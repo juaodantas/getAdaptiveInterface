@@ -9,12 +9,6 @@ const bigquery = new BigQuery();
 const PROJECT_ID = process.env.BIGQUERY_PROJECT_ID;
 const ANALYTICS_DATASET = process.env.BIGQUERY_ANALYTICS_DATASET;
 
-if (!PROJECT_ID || !ANALYTICS_DATASET) {
-  throw new Error(
-    "[CF] Variáveis de ambiente obrigatórias não configuradas: BIGQUERY_PROJECT_ID, BIGQUERY_ANALYTICS_DATASET",
-  );
-}
-
 // Páginas de sistema excluídas das análises de navegação (ponto único de manutenção)
 const EXCLUDED_PAGES_SQL = `
   '/modulosPage', '/splashPage', '/loginPage', '/homePage',
@@ -201,6 +195,11 @@ const queryShortcuts = `
 
 exports.getAdaptiveInterface = functions.https.onCall(
   async (dataOrRequest, context) => {
+    if (!PROJECT_ID || !ANALYTICS_DATASET) {
+      console.error("[CF] Variáveis de ambiente obrigatórias não configuradas: BIGQUERY_PROJECT_ID, BIGQUERY_ANALYTICS_DATASET");
+      return { dashboard: null, confidence: 0.0, shortcuts: [] };
+    }
+
     // Suportar v1 (1º arg = payload) e v2 (1º arg = request, payload em .data)
     const data =
       dataOrRequest && typeof dataOrRequest.data !== "undefined"
