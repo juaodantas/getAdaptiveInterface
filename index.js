@@ -95,16 +95,16 @@ async function fetchActiveUsers() {
 
 async function generateRecommendation(hour, dayOfWeek, history) {
   const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  const model = genAI.getGenerativeModel({ model: "gemini-3.1-flash-lite-preview" });
 
   const historyText =
     history.length > 0
       ? history
-          .map(
-            (r) =>
-              `${r.target_screen} | hora=${r.hour}h | dia=${r.day_of_week} | freq=${r.frequency}x`,
-          )
-          .join("\n")
+        .map(
+          (r) =>
+            `${r.target_screen} | hora=${r.hour}h | dia=${r.day_of_week} | freq=${r.frequency}x`,
+        )
+        .join("\n")
       : "Nenhum histórico disponível.";
 
   const dashboardInfo = Object.entries(DASHBOARD_MAP)
@@ -166,55 +166,55 @@ async function setCache(userId, recommendation) {
 // ============================================
 
 exports.getAdaptiveInterface = onCall(async (request) => {
-    if (!PROJECT_ID || !ANALYTICS_DATASET || !GEMINI_API_KEY) {
-      console.error("[CF] Variáveis de ambiente obrigatórias não configuradas");
-      return { dashboard: null, confidence: 0.0, shortcuts: [] };
-    }
+  if (!PROJECT_ID || !ANALYTICS_DATASET || !GEMINI_API_KEY) {
+    console.error("[CF] Variáveis de ambiente obrigatórias não configuradas");
+    return { dashboard: null, confidence: 0.0, shortcuts: [] };
+  }
 
-    const data = request.data;
-    const rawUserId = data.userId || request.auth?.uid;
-    const userId = rawUserId ? String(rawUserId).trim() : null;
+  const data = request.data;
+  const rawUserId = data.userId || request.auth?.uid;
+  const userId = rawUserId ? String(rawUserId).trim() : null;
 
-    if (!userId) {
-      console.error("[CF] userId não fornecido");
-      return { dashboard: null, confidence: 0.0, shortcuts: [] };
-    }
+  if (!userId) {
+    console.error("[CF] userId não fornecido");
+    return { dashboard: null, confidence: 0.0, shortcuts: [] };
+  }
 
-    // 1. Tenta retornar do cache do Firestore
-    const cached = await getCache(userId);
-    if (cached) {
-      console.log(`[CF] Cache hit — userId="${userId}"`);
-      return {
-        dashboard: cached.dashboard,
-        confidence: cached.confidence,
-        shortcuts: cached.shortcuts,
-      };
-    }
+  // 1. Tenta retornar do cache do Firestore
+  const cached = await getCache(userId);
+  if (cached) {
+    console.log(`[CF] Cache hit — userId="${userId}"`);
+    return {
+      dashboard: cached.dashboard,
+      confidence: cached.confidence,
+      shortcuts: cached.shortcuts,
+    };
+  }
 
-    // 2. Cache miss: gera recomendação on-demand via Gemini
-    const rawHour =
-      data.hour !== undefined ? Number(data.hour) : new Date().getHours();
-    const currentHour =
-      Number.isInteger(rawHour) && rawHour >= 0 && rawHour <= 23
-        ? rawHour
-        : new Date().getHours();
-    const dayOfWeek = new Date().getDay() + 1;
+  // 2. Cache miss: gera recomendação on-demand via Gemini
+  const rawHour =
+    data.hour !== undefined ? Number(data.hour) : new Date().getHours();
+  const currentHour =
+    Number.isInteger(rawHour) && rawHour >= 0 && rawHour <= 23
+      ? rawHour
+      : new Date().getHours();
+  const dayOfWeek = new Date().getDay() + 1;
 
-    console.log(
-      `[CF] Cache miss — gerando para userId="${userId}" hour=${currentHour}`,
-    );
+  console.log(
+    `[CF] Cache miss — gerando para userId="${userId}" hour=${currentHour}`,
+  );
 
-    try {
-      const history = await fetchNavigationHistory(userId);
-      const recommendation = await generateRecommendation(currentHour, dayOfWeek, history);
-      await setCache(userId, recommendation);
-      console.log(`[CF] Recomendação gerada e cacheada — userId="${userId}"`);
-      return recommendation;
-    } catch (error) {
-      console.error("[CF] Erro ao gerar recomendação:", error.message);
-      return { dashboard: null, confidence: 0.0, shortcuts: [] };
-    }
-  },
+  try {
+    const history = await fetchNavigationHistory(userId);
+    const recommendation = await generateRecommendation(currentHour, dayOfWeek, history);
+    await setCache(userId, recommendation);
+    console.log(`[CF] Recomendação gerada e cacheada — userId="${userId}"`);
+    return recommendation;
+  } catch (error) {
+    console.error("[CF] Erro ao gerar recomendação:", error.message);
+    return { dashboard: null, confidence: 0.0, shortcuts: [] };
+  }
+},
 );
 
 // ============================================
