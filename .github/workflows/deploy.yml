@@ -27,6 +27,8 @@ jobs:
         run: |
           echo "BIGQUERY_PROJECT_ID=${{ secrets.BIGQUERY_PROJECT_ID }}" > .env
           echo "BIGQUERY_ANALYTICS_DATASET=${{ secrets.BIGQUERY_ANALYTICS_DATASET }}" >> .env
+          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" >> .env
+          echo "SCHEDULER_SECRET=${{ secrets.SCHEDULER_SECRET }}" >> .env
 
       - name: Deploy to Firebase
         run: npx firebase-tools deploy --only functions --project ${{ secrets.FIREBASE_PROJECT_ID }} --token ${{ secrets.FIREBASE_TOKEN }} --non-interactive
