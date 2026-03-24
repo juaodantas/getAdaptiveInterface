@@ -1,4 +1,4 @@
-const functions = require("firebase-functions");
+const { onCall, onRequest } = require("firebase-functions/v2/https");
 const { BigQuery } = require("@google-cloud/bigquery");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const admin = require("firebase-admin");
@@ -165,15 +165,14 @@ async function setCache(userId, recommendation) {
 // FUNCTION 1: serving — chamada pelo frontend
 // ============================================
 
-exports.getAdaptiveInterface = functions.https.onCall(
-  async (dataOrRequest, context) => {
+exports.getAdaptiveInterface = onCall(async (request) => {
     if (!PROJECT_ID || !ANALYTICS_DATASET || !GEMINI_API_KEY) {
       console.error("[CF] Variáveis de ambiente obrigatórias não configuradas");
       return { dashboard: null, confidence: 0.0, shortcuts: [] };
     }
 
-    const data = dataOrRequest?.data ?? dataOrRequest;
-    const rawUserId = data.userId || context.auth?.uid;
+    const data = request.data;
+    const rawUserId = data.userId || request.auth?.uid;
     const userId = rawUserId ? String(rawUserId).trim() : null;
 
     if (!userId) {
@@ -223,9 +222,9 @@ exports.getAdaptiveInterface = functions.https.onCall(
 // Processa usuários ativos do dia anterior e pré-aquece o cache
 // ============================================
 
-exports.generateDailyRecommendations = functions
-  .runWith({ timeoutSeconds: 540, memory: "256MB" })
-  .https.onRequest(async (req, res) => {
+exports.generateDailyRecommendations = onRequest(
+  { timeoutSeconds: 540, memory: "256MiB" },
+  async (req, res) => {
     if (req.headers["x-scheduler-secret"] !== SCHEDULER_SECRET) {
       res.status(401).send("Unauthorized");
       return;
@@ -278,4 +277,5 @@ exports.generateDailyRecommendations = functions
       console.error("[Batch] Erro geral:", error.message);
       res.status(500).send(error.message);
     }
-  });
+  },
+);
