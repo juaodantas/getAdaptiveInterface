@@ -31,12 +31,50 @@ const USER_ID_SQL = `
   )
 `;
 
-const DASHBOARD_MAP = {
-  "Lotes em Produção": ["/lotePage", "/setorPage"],
-  "Tarefas Pendentes": ["/agendaPage", "/gerenciarEquipePage"],
-  "Produção Total": ["/solucaoPage", "/reservatoriosPage", "/historicoPage"],
-  "Top Culturas": ["/protocoloPage", "/cadernoCampoPage"],
+// ============================================
+// CONFIGURAÇÃO DOS DASHBOARDS
+// ============================================
+// Definição centralizada com metadados técnicos para o frontend
+const DASHBOARD_CONFIG = {
+  LOTE_PRODUCAO: {
+    id: "LOTE_PRODUCAO",
+    displayName: "Lotes em Produção",
+    cardType: "lotes",
+    screens: ["/lotePage", "/setorPage"],
+  },
+  TAREFAS_PENDENTES: {
+    id: "TAREFAS_PENDENTES",
+    displayName: "Tarefas Pendentes",
+    cardType: "tarefas",
+    screens: ["/agendaPage", "/gerenciarEquipePage"],
+  },
+  PRODUCAO_TOTAL: {
+    id: "PRODUCAO_TOTAL",
+    displayName: "Produção Total",
+    cardType: "producao",
+    screens: ["/solucaoPage", "/reservatoriosPage", "/historicoPage"],
+  },
+  TOP_CULTURAS: {
+    id: "TOP_CULTURAS",
+    displayName: "Top Culturas",
+    cardType: "culturas",
+    screens: ["/protocoloPage", "/cadernoCampoPage"],
+  },
+  SAUDE_EQUIPES: {
+    id: "SAUDE_EQUIPES",
+    displayName: "Saúde das Equipes",
+    cardType: "saude",
+    screens: ["/gerenciarEquipePage", "/agendaPage"],
+  },
 };
+
+// Mapa legacy para compatibilidade com consultas existentes
+const DASHBOARD_MAP = Object.fromEntries(
+  Object.values(DASHBOARD_CONFIG).map((config) => [
+    config.displayName,
+    config.screens,
+  ]),
+);
 
 // ============================================
 // BIGQUERY — histórico de navegação
@@ -107,9 +145,13 @@ async function generateRecommendation(hour, dayOfWeek, history) {
         .join("\n")
       : "Nenhum histórico disponível.";
 
-  const dashboardInfo = Object.entries(DASHBOARD_MAP)
-    .map(([name, screens]) => `- "${name}": ${screens.join(", ")}`)
+  const dashboardInfo = Object.values(DASHBOARD_CONFIG)
+    .map((config) => `- "${config.displayName}" (cardType: "${config.cardType}"): ${config.screens.join(", ")}`)
     .join("\n");
+
+  const validDashboardNames = Object.values(DASHBOARD_CONFIG)
+    .map((config) => `"${config.displayName}"`)
+    .join(", ");
 
   const prompt = `Você é um sistema de recomendação de navegação para um app agrícola.
 
@@ -122,12 +164,17 @@ Dashboards disponíveis e suas telas:
 ${dashboardInfo}
 
 Com base no histórico e no contexto atual, retorne APENAS JSON válido sem markdown:
-{"dashboard":"nome do dashboard ou null","confidence":0.0,"shortcuts":[{"route":"/tela","confidence":0.0}]}
+{"dashboard":"nome do dashboard ou null","dashboardId":"ID_TECNICO","cardType":"tipo_do_card","confidence":0.0,"shortcuts":[{"route":"/tela","confidence":0.0}]}
 
 Regras:
+- dashboard deve ser um dos valores válidos: ${validDashboardNames}
+- dashboardId deve ser um dos valores: ${Object.keys(DASHBOARD_CONFIG).join(", ")}
+- cardType deve ser um dos valores: ${[...new Set(Object.values(DASHBOARD_CONFIG).map(c => c.cardType))].join(", ")}
 - confidence entre 0.0 e 1.0
 - máximo 4 shortcuts
 - priorize padrões do mesmo horário e dia da semana`;
+
+  console.log(`[CF] Prompt para Gemini - hora=${hour}, dia=${dayOfWeek}`);
 
   const result = await model.generateContent(prompt);
   const text = result.response
@@ -137,7 +184,74 @@ Regras:
     .replace(/```/g, "")
     .trim();
 
-  return JSON.parse(text);
+  const parsed = JSON.parse(text);
+  return normalizeRecommendation(parsed);
+}
+
+// ============================================
+// NORMALIZAÇÃO DA RECOMENDAÇÃO
+// Garante que a resposta tenha todos os campos necessários
+// ============================================
+function normalizeRecommendation(raw) {
+  if (!raw || typeof raw !== "object") {
+    return {
+      dashboard: null,
+      dashboardId: null,
+      cardType: null,
+      confidence: 0.0,
+      shortcuts: [],
+    };
+  }
+
+  // Tenta encontrar o dashboard nos campos possíveis
+  const dashboardName = raw.dashboard || raw.dashboardName || null;
+  let dashboardId = raw.dashboardId || null;
+  let cardType = raw.cardType || null;
+
+  // Se temos o nome do dashboard mas não o ID/cardType, busca na config
+  if (dashboardName && (!dashboardId || !cardType)) {
+    const config = Object.values(DASHBOARD_CONFIG).find(
+      (c) => c.displayName === dashboardName,
+    );
+    if (config) {
+      dashboardId = config.id;
+      cardType = config.cardType;
+    }
+  }
+
+  // Se temos o ID mas não o cardType, busca na config
+  if (dashboardId && !cardType) {
+    const config = DASHBOARD_CONFIG[dashboardId];
+    if (config) {
+      cardType = config.cardType;
+    }
+  }
+
+  // Validação final: se não conseguimos mapear, retorna null
+  if (!cardType || !DASHBOARD_CONFIG[dashboardId]) {
+    console.warn(`[CF] Dashboard não mapeado: "${dashboardName}" / ID: "${dashboardId}"`);
+    return {
+      dashboard: null,
+      dashboardId: null,
+      cardType: null,
+      confidence: 0.0,
+      shortcuts: raw.shortcuts || [],
+    };
+  }
+
+  return {
+    dashboard: dashboardName,
+    dashboardId: dashboardId,
+    cardType: cardType,
+    confidence: Math.max(0, Math.min(1, parseFloat(raw.confidence) || 0)),
+    shortcuts: (raw.shortcuts || []).slice(0, 4).map((s) => ({
+      route: s.route || s.predicted_target_screen || "",
+      confidence: Math.max(0, Math.min(1, parseFloat(s.confidence || s.prob) || 0.5)),
+      resourceId: s.resourceId || null,
+      resourceType: s.resourceType || null,
+      resourceName: s.resourceName || null,
+    })),
+  };
 }
 
 // ============================================
@@ -184,11 +298,10 @@ exports.getAdaptiveInterface = onCall(async (request) => {
   const cached = await getCache(userId);
   if (cached) {
     console.log(`[CF] Cache hit — userId="${userId}"`);
-    return {
-      dashboard: cached.dashboard,
-      confidence: cached.confidence,
-      shortcuts: cached.shortcuts,
-    };
+    // Normaliza cache antigo para garantir novos campos
+    const normalized = normalizeRecommendation(cached);
+    console.log(`[CF] Cache retornado: dashboard="${normalized.dashboard}", cardType="${normalized.cardType}"`);
+    return normalized;
   }
 
   // 2. Cache miss: gera recomendação on-demand via Gemini
@@ -209,10 +322,17 @@ exports.getAdaptiveInterface = onCall(async (request) => {
     const recommendation = await generateRecommendation(currentHour, dayOfWeek, history);
     await setCache(userId, recommendation);
     console.log(`[CF] Recomendação gerada e cacheada — userId="${userId}"`);
+    console.log(`[CF] Resposta: dashboard="${recommendation.dashboard}", cardType="${recommendation.cardType}", confidence=${(recommendation.confidence * 100).toFixed(1)}%`);
     return recommendation;
   } catch (error) {
     console.error("[CF] Erro ao gerar recomendação:", error.message);
-    return { dashboard: null, confidence: 0.0, shortcuts: [] };
+    return {
+      dashboard: null,
+      dashboardId: null,
+      cardType: null,
+      confidence: 0.0,
+      shortcuts: [],
+    };
   }
 },
 );
