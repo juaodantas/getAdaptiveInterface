@@ -27,15 +27,6 @@ const ADAPTIVE_MODES = {
   GRADUAL: 'GRADUAL',
 };
 
-module.exports = {
-  ADAPTIVE_MODES,
-  getDefaultShortcuts,
-  getUserConfig,
-  getSessionNavigations,
-  generateInstantRecommendation,
-  normalizeRecommendation,
-};
-
 const EXCLUDED_PAGES_SQL = `
   '/modulosPage', '/splashPage', '/loginPage', '/homePage',
   '/cadastroPage', '/recuperarSenha', '/codigoSeguranca', '/novaSenha',
@@ -639,3 +630,12 @@ exports.generateDailyRecommendations = onRequest(
     }
   },
 );
+
+Object.assign(module.exports, {
+  ADAPTIVE_MODES,
+  getDefaultShortcuts,
+  getUserConfig,
+  getSessionNavigations,
+  generateInstantRecommendation,
+  normalizeRecommendation,
+});
