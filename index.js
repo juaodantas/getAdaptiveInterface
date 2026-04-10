@@ -17,6 +17,25 @@ const ANALYTICS_DATASET = process.env.BIGQUERY_ANALYTICS_DATASET;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const SCHEDULER_SECRET = process.env.SCHEDULER_SECRET;
 
+// ============================================
+// ADAPTIVE MODES — configuração de modos de adaptação
+// ============================================
+
+const ADAPTIVE_MODES = {
+  STATIC: 'STATIC',
+  INSTANT: 'INSTANT',
+  GRADUAL: 'GRADUAL',
+};
+
+module.exports = {
+  ADAPTIVE_MODES,
+  getDefaultShortcuts,
+  getUserConfig,
+  getSessionNavigations,
+  generateInstantRecommendation,
+  normalizeRecommendation,
+};
+
 const EXCLUDED_PAGES_SQL = `
   '/modulosPage', '/splashPage', '/loginPage', '/homePage',
   '/cadastroPage', '/recuperarSenha', '/codigoSeguranca', '/novaSenha',
@@ -54,12 +73,6 @@ const DASHBOARD_CONFIG = {
     cardType: "producao",
     screens: ["/solucaoPage", "/reservatoriosPage", "/historicoPage"],
   },
-  TOP_CULTURAS: {
-    id: "TOP_CULTURAS",
-    displayName: "Top Culturas",
-    cardType: "culturas",
-    screens: ["/protocoloPage", "/cadernoCampoPage"],
-  },
   SAUDE_EQUIPES: {
     id: "SAUDE_EQUIPES",
     displayName: "Saúde das Equipes",
@@ -75,6 +88,153 @@ const DASHBOARD_MAP = Object.fromEntries(
     config.screens,
   ]),
 );
+
+// ============================================
+// ADAPTIVE MODES — helper functions
+// ============================================
+
+async function getUserConfig(userId) {
+  try {
+    const doc = await db.collection('userAdaptiveConfig').doc(userId).get();
+    if (!doc.exists) {
+      return null;
+    }
+    const data = doc.data();
+    if (data.expiresAt && data.expiresAt.toDate() < new Date()) {
+      return null;
+    }
+    return data;
+  } catch (error) {
+    console.error(`[CF] Erro ao buscar config do usuário "${userId}":`, error.message);
+    return null;
+  }
+}
+
+async function getSessionNavigations(sessionId) {
+  try {
+    const snapshot = await db
+      .collection('sessionNavigations')
+      .doc(sessionId)
+      .collection('navigations')
+      .orderBy('timestamp', 'asc')
+      .get();
+    return snapshot.docs.map((doc) => doc.data());
+  } catch (error) {
+    console.error(`[CF] Erro ao buscar navegações da sessão "${sessionId}":`, error.message);
+    return [];
+  }
+}
+
+function getDefaultShortcuts() {
+  return [
+    { route: '/lotePage', confidence: 0.5 },
+    { route: '/solucaoPage', confidence: 0.5 },
+    { route: '/agendaPage', confidence: 0.5 },
+    { route: '/reservatoriosPage', confidence: 0.5 },
+  ];
+}
+
+async function generateInstantRecommendation(navigations, hour, dayOfWeek) {
+  if (!navigations || navigations.length === 0) {
+    console.log('[CF] INSTANT: Nenhuma navegação na sessão');
+    return {
+      dashboard: null,
+      dashboardId: null,
+      cardType: null,
+      confidence: 0.0,
+      shortcuts: getDefaultShortcuts(),
+    };
+  }
+
+  const navCount = navigations.length;
+  const maxConfidence = navCount < 10 ? Math.min(0.5, navCount * 0.05) : 0.5;
+
+  const screenCounts = {};
+  navigations.forEach((nav) => {
+    const screen = nav.screen;
+    screenCounts[screen] = (screenCounts[screen] || 0) + 1;
+  });
+
+  const sortedScreens = Object.entries(screenCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10);
+
+  const historyText = sortedScreens
+    .map(([screen, count]) => `${screen} | visitas=${count}x`)
+    .join('\n');
+
+  const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+  const model = genAI.getGenerativeModel({ model: 'gemini-3.1-flash-lite-preview' });
+
+  const dashboardInfo = Object.values(DASHBOARD_CONFIG)
+    .map((config) => `- "${config.displayName}" (cardType: "${config.cardType}"): ${config.screens.join(', ')}`)
+    .join('\n');
+
+  const validDashboardNames = Object.values(DASHBOARD_CONFIG)
+    .map((config) => `"${config.displayName}"`)
+    .join(', ');
+
+  const prompt = `Você é um sistema de recomendação de navegação para um app agrícola.
+
+Navegações desta sessão (${navCount} cliques):
+${historyText}
+
+Contexto atual: hora=${hour}h, dia_semana=${dayOfWeek} (1=Dom,2=Seg,3=Ter,4=Qua,5=Qui,6=Sex,7=Sáb)
+
+Dashboards disponíveis e suas telas:
+${dashboardInfo}
+
+IMPORTANTE:
+- Se houver menos de 3 navegações, retorne null para dashboard
+- Confidence deve ser proporcional à quantidade de dados (máx ${maxConfidence.toFixed(2)})
+- Priorize telas visitadas múltiplas vezes
+
+Com base nas navegações desta sessão, retorne APENAS JSON válido sem markdown:
+{"dashboard":"nome do dashboard ou null","dashboardId":"ID_TECNICO","cardType":"tipo_do_card","confidence":0.0,"shortcuts":[{"route":"/tela","confidence":0.0}]}
+
+Regras:
+- dashboard deve ser um dos valores válidos: ${validDashboardNames}
+- dashboardId deve ser um dos valores: ${Object.keys(DASHBOARD_CONFIG).join(', ')}
+- cardType deve ser um dos valores: ${[...new Set(Object.values(DASHBOARD_CONFIG).map(c => c.cardType))].join(', ')}
+- confidence entre 0.0 e ${maxConfidence.toFixed(2)} (não ultrapasse este valor!)
+- máximo 4 shortcuts
+- priorize telas mais visitadas na sessão`;
+
+  console.log(`[CF] INSTANT: Prompt para Gemini - navCount=${navCount}, maxConfidence=${maxConfidence.toFixed(2)}`);
+
+  try {
+    const result = await model.generateContent(prompt);
+    const text = result.response
+      .text()
+      .trim()
+      .replace(/```json?\n?/g, '')
+      .replace(/```/g, '')
+      .trim();
+
+    const parsed = JSON.parse(text);
+    const recommendation = normalizeRecommendation(parsed);
+
+    recommendation.confidence = Math.min(recommendation.confidence, maxConfidence);
+
+    if (navCount < 3) {
+      recommendation.dashboard = null;
+      recommendation.dashboardId = null;
+      recommendation.cardType = null;
+    }
+
+    console.log(`[CF] INSTANT: Recomendação gerada - dashboard="${recommendation.dashboard}", confidence=${(recommendation.confidence * 100).toFixed(1)}%`);
+    return recommendation;
+  } catch (error) {
+    console.error('[CF] INSTANT: Erro no Gemini:', error.message);
+    return {
+      dashboard: null,
+      dashboardId: null,
+      cardType: null,
+      confidence: 0.0,
+      shortcuts: getDefaultShortcuts(),
+    };
+  }
+}
 
 // ============================================
 // BIGQUERY — histórico de navegação
@@ -282,7 +442,7 @@ async function setCache(userId, recommendation) {
 exports.getAdaptiveInterface = onCall(async (request) => {
   if (!PROJECT_ID || !ANALYTICS_DATASET || !GEMINI_API_KEY) {
     console.error("[CF] Variáveis de ambiente obrigatórias não configuradas");
-    return { dashboard: null, confidence: 0.0, shortcuts: [] };
+    return { dashboard: null, confidence: 0.0, shortcuts: [], mode: ADAPTIVE_MODES.GRADUAL };
   }
 
   const data = request.data;
@@ -291,20 +451,9 @@ exports.getAdaptiveInterface = onCall(async (request) => {
 
   if (!userId) {
     console.error("[CF] userId não fornecido");
-    return { dashboard: null, confidence: 0.0, shortcuts: [] };
+    return { dashboard: null, confidence: 0.0, shortcuts: [], mode: ADAPTIVE_MODES.GRADUAL };
   }
 
-  // 1. Tenta retornar do cache do Firestore
-  const cached = await getCache(userId);
-  if (cached) {
-    console.log(`[CF] Cache hit — userId="${userId}"`);
-    // Normaliza cache antigo para garantir novos campos
-    const normalized = normalizeRecommendation(cached);
-    console.log(`[CF] Cache retornado: dashboard="${normalized.dashboard}", cardType="${normalized.cardType}"`);
-    return normalized;
-  }
-
-  // 2. Cache miss: gera recomendação on-demand via Gemini
   const rawHour =
     data.hour !== undefined ? Number(data.hour) : new Date().getHours();
   const currentHour =
@@ -313,28 +462,119 @@ exports.getAdaptiveInterface = onCall(async (request) => {
       : new Date().getHours();
   const dayOfWeek = new Date().getDay() + 1;
 
-  console.log(
-    `[CF] Cache miss — gerando para userId="${userId}" hour=${currentHour}`,
-  );
+  let mode = data.mode || null;
+  const sessionId = data.sessionId || null;
 
-  try {
-    const history = await fetchNavigationHistory(userId);
-    const recommendation = await generateRecommendation(currentHour, dayOfWeek, history);
-    await setCache(userId, recommendation);
-    console.log(`[CF] Recomendação gerada e cacheada — userId="${userId}"`);
-    console.log(`[CF] Resposta: dashboard="${recommendation.dashboard}", cardType="${recommendation.cardType}", confidence=${(recommendation.confidence * 100).toFixed(1)}%`);
-    return recommendation;
-  } catch (error) {
-    console.error("[CF] Erro ao gerar recomendação:", error.message);
-    return {
-      dashboard: null,
-      dashboardId: null,
-      cardType: null,
-      confidence: 0.0,
-      shortcuts: [],
-    };
+  if (!mode) {
+    const userConfig = await getUserConfig(userId);
+    mode = userConfig?.mode || ADAPTIVE_MODES.GRADUAL;
   }
-},
+
+  if (!Object.values(ADAPTIVE_MODES).includes(mode)) {
+    console.warn(`[CF] Modo inválido "${mode}", usando GRADUAL`);
+    mode = ADAPTIVE_MODES.GRADUAL;
+  }
+
+  console.log(`[CF] Modo determinado: ${mode} — userId="${userId}"`);
+
+  switch (mode) {
+    case ADAPTIVE_MODES.STATIC:
+      console.log(`[CF] STATIC: Retornando atalhos padrão`);
+      return {
+        dashboard: null,
+        dashboardId: null,
+        cardType: null,
+        confidence: 0.0,
+        shortcuts: getDefaultShortcuts(),
+        mode: ADAPTIVE_MODES.STATIC,
+      };
+
+    case ADAPTIVE_MODES.INSTANT:
+      if (!sessionId) {
+        console.error(`[CF] INSTANT: sessionId obrigatório não fornecido`);
+        return {
+          dashboard: null,
+          dashboardId: null,
+          cardType: null,
+          confidence: 0.0,
+          shortcuts: getDefaultShortcuts(),
+          mode: ADAPTIVE_MODES.INSTANT,
+        };
+      }
+
+      try {
+        console.log(`[CF] INSTANT: Buscando navegações da sessão "${sessionId}"`);
+        const navigations = await getSessionNavigations(sessionId);
+
+        if (navigations.length === 0) {
+          console.log(`[CF] INSTANT: Sessão sem navegações`);
+          return {
+            dashboard: null,
+            dashboardId: null,
+            cardType: null,
+            confidence: 0.0,
+            shortcuts: getDefaultShortcuts(),
+            mode: ADAPTIVE_MODES.INSTANT,
+          };
+        }
+
+        const recommendation = await generateInstantRecommendation(navigations, currentHour, dayOfWeek);
+        return {
+          ...recommendation,
+          mode: ADAPTIVE_MODES.INSTANT,
+        };
+      } catch (error) {
+        console.error(`[CF] INSTANT: Erro ao processar sessão:`, error.message);
+        return {
+          dashboard: null,
+          dashboardId: null,
+          cardType: null,
+          confidence: 0.0,
+          shortcuts: getDefaultShortcuts(),
+          mode: ADAPTIVE_MODES.INSTANT,
+        };
+      }
+
+    case ADAPTIVE_MODES.GRADUAL:
+    default:
+      const cached = await getCache(userId);
+      if (cached) {
+        console.log(`[CF] Cache hit — userId="${userId}"`);
+        const normalized = normalizeRecommendation(cached);
+        console.log(`[CF] Cache retornado: dashboard="${normalized.dashboard}", cardType="${normalized.cardType}"`);
+        return {
+          ...normalized,
+          mode: ADAPTIVE_MODES.GRADUAL,
+        };
+      }
+
+      console.log(
+        `[CF] Cache miss — gerando para userId="${userId}" hour=${currentHour}`,
+      );
+
+      try {
+        const history = await fetchNavigationHistory(userId);
+        const recommendation = await generateRecommendation(currentHour, dayOfWeek, history);
+        await setCache(userId, recommendation);
+        console.log(`[CF] Recomendação gerada e cacheada — userId="${userId}"`);
+        console.log(`[CF] Resposta: dashboard="${recommendation.dashboard}", cardType="${recommendation.cardType}", confidence=${(recommendation.confidence * 100).toFixed(1)}%`);
+        return {
+          ...recommendation,
+          mode: ADAPTIVE_MODES.GRADUAL,
+        };
+      } catch (error) {
+        console.error("[CF] Erro ao gerar recomendação:", error.message);
+        return {
+          dashboard: null,
+          dashboardId: null,
+          cardType: null,
+          confidence: 0.0,
+          shortcuts: [],
+          mode: ADAPTIVE_MODES.GRADUAL,
+        };
+      }
+  }
+}, 
 );
 
 // ============================================

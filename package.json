@@ -12,9 +12,13 @@
     "@google-cloud/bigquery": "^7.0.0",
     "@google/generative-ai": "^0.21.0"
   },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  },
   "scripts": {
     "start": "firebase serve --only functions",
-    "deploy": "firebase deploy --only functions"
+    "deploy": "firebase deploy --only functions",
+    "test": "jest"
   },
   "overrides": {
     "@tootallnate/once": "3.0.1"

@@ -123,7 +123,6 @@ Chamada via `functions.httpsCallable('getAdaptiveInterface')` no Flutter.
 | `"Lotes em Produção"` | `/lotePage`, `/setorPage` |
 | `"Tarefas Pendentes"` | `/agendaPage`, `/gerenciarEquipePage` |
 | `"Produção Total"` | `/solucaoPage`, `/reservatoriosPage`, `/historicoPage` |
-| `"Top Culturas"` | `/protocoloPage`, `/cadernoCampoPage` |
 
 ### Comportamento de fallback
 
