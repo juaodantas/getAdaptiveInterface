@@ -631,6 +631,142 @@ exports.generateDailyRecommendations = onRequest(
   },
 );
 
+// ============================================
+// ADMIN ADAPTIVE MODE — API HTTP para gestão
+// ============================================
+
+const ADMIN_ALLOWED_METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'];
+
+/**
+ * Cloud Function HTTP para gerenciamento de modos adaptativos.
+ *
+ * Endpoints (todos requerem ?key=<ADMIN_KEY>):
+ *   GET    — lista configs ou busca por userId (?userId=xxx)
+ *   POST   — configura usuário (body: {userId, mode, sessionId, testGroup, expiresAt})
+ *   DELETE — encerra sessão e remove config (?userId=xxx)
+ *
+ * Auth: header Authorization: Bearer <key> ou query param ?key=<key>
+ * Config: firebase functions:config:set admin.key="sua-chave"
+ */
+exports.adminAdaptiveMode = onRequest(
+  { cors: true },
+  async (req, res) => {
+    // Auth simples via API key
+    const apiKey =
+      req.headers.authorization?.split('Bearer ')[1] ||
+      req.query?.key ||
+      req.body?.key;
+    const expectedKey = process.env.ADMIN_KEY;
+
+    if (!expectedKey || apiKey !== expectedKey) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const method = req.method;
+    if (!ADMIN_ALLOWED_METHODS.includes(method)) {
+      return res.status(405).json({ error: 'Method not allowed' });
+    }
+
+    try {
+      // GET — listar ou buscar config
+      if (method === 'GET') {
+        const userId = req.query?.userId || req.body?.userId;
+
+        if (userId) {
+          const doc = await db.collection('userAdaptiveConfig').doc(String(userId)).get();
+          if (!doc.exists) return res.json(null);
+          return res.json({ id: doc.id, ...doc.data() });
+        }
+
+        const snap = await db.collection('userAdaptiveConfig')
+          .orderBy('createdAt', 'desc')
+          .get();
+        return res.json(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      }
+
+      // POST / PUT — criar ou atualizar config
+      if (method === 'POST' || method === 'PUT') {
+        const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+        const { userId, mode, sessionId, testGroup, expiresAt } = body;
+
+        if (!userId || !mode) {
+          return res.status(400).json({ error: 'userId e mode são obrigatórios' });
+        }
+        if (!Object.values(ADAPTIVE_MODES).includes(mode)) {
+          return res.status(400).json({ error: `Modo inválido. Permitidos: ${Object.values(ADAPTIVE_MODES).join(', ')}` });
+        }
+
+        const batch = db.batch();
+        const configRef = db.collection('userAdaptiveConfig').doc(String(userId));
+
+        const configData = {
+          userId: String(userId),
+          mode,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        };
+        if (sessionId) configData.sessionId = sessionId;
+        if (testGroup) configData.testGroup = testGroup;
+        if (expiresAt) {
+          configData.expiresAt = admin.firestore.Timestamp.fromDate(new Date(expiresAt));
+        }
+
+        batch.set(configRef, configData, { merge: true });
+
+        // Se INSTANT e sessionId informado, garante documento de sessão
+        if (mode === ADAPTIVE_MODES.INSTANT && sessionId) {
+          const sessionRef = db.collection('sessionNavigations').doc(sessionId);
+          batch.set(sessionRef, {
+            sessionId,
+            userId: String(userId),
+            startedAt: admin.firestore.FieldValue.serverTimestamp(),
+            status: 'active',
+          }, { merge: true });
+        }
+
+        await batch.commit();
+        console.log(`[Admin] ${userId} → modo ${mode}${sessionId ? `, sessão ${sessionId}` : ''}`);
+        return res.json({ success: true, userId, mode, sessionId });
+      }
+
+      // DELETE — encerrar sessão e remover config
+      if (method === 'DELETE') {
+        const userId = req.query?.userId || req.body?.userId;
+        if (!userId) {
+          return res.status(400).json({ error: 'userId é obrigatório' });
+        }
+
+        const uid = String(userId);
+        // Busca sessionId antes de deletar config
+        const configDoc = await db.collection('userAdaptiveConfig').doc(uid).get();
+        const sid = configDoc.exists ? configDoc.data()?.sessionId : null;
+
+        await db.collection('userAdaptiveConfig').doc(uid).delete();
+
+        if (sid) {
+          await db.collection('sessionNavigations').doc(sid).update({
+            status: 'completed',
+            endedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          console.log(`[Admin] Sessão encerrada: ${uid}, sessionId=${sid}`);
+        } else {
+          console.log(`[Admin] Config removida: ${uid} (sem sessão ativa)`);
+        }
+
+        return res.json({ success: true, userId: uid });
+      }
+
+      return res.status(405).json({ error: 'Method not allowed' });
+    } catch (err) {
+      console.error('[Admin] Erro:', err.message);
+      return res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// ============================================
+// EXPORTS
+// ============================================
+
 Object.assign(module.exports, {
   ADAPTIVE_MODES,
   getDefaultShortcuts,
