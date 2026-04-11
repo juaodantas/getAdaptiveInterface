@@ -33,6 +33,29 @@ const EXCLUDED_PAGES_SQL = `
   '/multiAccountsPage', '/confirmsegurancaPage', '/permissaoNegadaPage'
 `;
 
+// Array JS para validação em runtime (usado nos filtros de resposta da Gemini)
+const EXCLUDED_PAGES_ARRAY = [
+  '/modulosPage', '/splashPage', '/loginPage', '/homePage',
+  '/cadastroPage', '/recuperarSenha', '/codigoSeguranca', '/novaSenha',
+  '/multiAccountsPage', '/confirmsegurancaPage', '/permissaoNegadaPage',
+];
+
+// ============================================
+// REQUISITOS DE RECURSO POR TELA
+// ============================================
+// Mapeia telas que exigem um resourceId/resourceType para funcionar corretamente.
+// Se uma tela está aqui e o shortcut não tem recurso, ela será descartada.
+const SCREEN_RESOURCE_REQUIREMENTS = {
+  '/lotePage':         { type: 'lote' },
+  '/setorPage':        { type: 'setor' },
+  '/solucaoPage':      { type: 'solucao' },
+  '/reservatoriosPage': { type: 'reservatorio' },
+  // Telas que funcionam sem recurso (não precisam estar aqui)
+  // '/historicoPage'     → opcional
+  // '/agendaPage'        → opcional
+  // '/gerenciarEquipePage' → opcional
+};
+
 const USER_ID_SQL = `
   COALESCE(
     (SELECT value.string_value FROM UNNEST(user_properties) WHERE key = 'user_id'),
@@ -165,6 +188,14 @@ async function generateInstantRecommendation(navigations, hour, dayOfWeek) {
     .map((config) => `"${config.displayName}"`)
     .join(', ');
 
+  // Lista de telas que exigem resourceId/resourceType
+  const screensRequiringResource = Object.entries(SCREEN_RESOURCE_REQUIREMENTS)
+    .map(([route, req]) => `- "${route}" requer resourceId (tipo: "${req.type}")`)
+    .join('\n');
+
+  // Lista de telas proibidas
+  const excludedPagesList = EXCLUDED_PAGES_ARRAY.join(', ');
+
   const prompt = `Você é um sistema de recomendação de navegação para um app agrícola.
 
 Navegações desta sessão (${navCount} cliques):
@@ -179,6 +210,9 @@ IMPORTANTE:
 - Se houver menos de 3 navegações, retorne null para dashboard
 - Confidence deve ser proporcional à quantidade de dados (máx ${maxConfidence.toFixed(2)})
 - Priorize telas visitadas múltiplas vezes
+- NUNCA retorne estas telas (são excluídas): ${excludedPagesList}
+- Para as telas abaixo, só retorne se o histórico tiver resourceId/resourceType:
+${screensRequiringResource}
 
 Com base nas navegações desta sessão, retorne APENAS JSON válido sem markdown:
 {"dashboard":"nome do dashboard ou null","dashboardId":"ID_TECNICO","cardType":"tipo_do_card","confidence":0.0,"shortcuts":[{"route":"/tela","confidence":0.0}]}
@@ -189,7 +223,9 @@ Regras:
 - cardType deve ser um dos valores: ${[...new Set(Object.values(DASHBOARD_CONFIG).map(c => c.cardType))].join(', ')}
 - confidence entre 0.0 e ${maxConfidence.toFixed(2)} (não ultrapasse este valor!)
 - máximo 4 shortcuts
-- priorize telas mais visitadas na sessão`;
+- priorize telas mais visitadas na sessão
+- NÃO inclua telas excluídas: ${excludedPagesList}
+- Só inclua telas com requisito de recurso se tiver resourceId e resourceType no histórico`;
 
   console.log(`[CF] INSTANT: Prompt para Gemini - navCount=${navCount}, maxConfidence=${maxConfidence.toFixed(2)}`);
 
@@ -304,6 +340,14 @@ async function generateRecommendation(hour, dayOfWeek, history) {
     .map((config) => `"${config.displayName}"`)
     .join(", ");
 
+  // Lista de telas que exigem resourceId/resourceType
+  const screensRequiringResource = Object.entries(SCREEN_RESOURCE_REQUIREMENTS)
+    .map(([route, req]) => `- "${route}" requer resourceId (tipo: "${req.type}")`)
+    .join("\n");
+
+  // Lista de telas proibidas
+  const excludedPagesList = EXCLUDED_PAGES_ARRAY.join(", ");
+
   const prompt = `Você é um sistema de recomendação de navegação para um app agrícola.
 
 Histórico de navegação do usuário (últimos 30 dias):
@@ -314,6 +358,11 @@ Contexto atual: hora=${hour}h, dia_semana=${dayOfWeek} (1=Dom,2=Seg,3=Ter,4=Qua,
 Dashboards disponíveis e suas telas:
 ${dashboardInfo}
 
+IMPORTANTE:
+- NUNCA retorne estas telas (são excluídas): ${excludedPagesList}
+- Para as telas abaixo, só retorne se o histórico tiver resourceId/resourceType:
+${screensRequiringResource}
+
 Com base no histórico e no contexto atual, retorne APENAS JSON válido sem markdown:
 {"dashboard":"nome do dashboard ou null","dashboardId":"ID_TECNICO","cardType":"tipo_do_card","confidence":0.0,"shortcuts":[{"route":"/tela","confidence":0.0}]}
 
@@ -323,7 +372,9 @@ Regras:
 - cardType deve ser um dos valores: ${[...new Set(Object.values(DASHBOARD_CONFIG).map(c => c.cardType))].join(", ")}
 - confidence entre 0.0 e 1.0
 - máximo 4 shortcuts
-- priorize padrões do mesmo horário e dia da semana`;
+- priorize padrões do mesmo horário e dia da semana
+- NÃO inclua telas excluídas: ${excludedPagesList}
+- Só inclua telas com requisito de recurso se tiver resourceId e resourceType no histórico`;
 
   console.log(`[CF] Prompt para Gemini - hora=${hour}, dia=${dayOfWeek}`);
 
@@ -337,6 +388,60 @@ Regras:
 
   const parsed = JSON.parse(text);
   return normalizeRecommendation(parsed);
+}
+
+// ============================================
+// FILTROS E VALIDAÇÕES DE SHORTCUTS
+// ============================================
+
+/**
+ * Remove shortcuts que apontam para páginas excluídas das adaptações.
+ */
+function filterExcludedPages(shortcuts) {
+  return shortcuts.filter((s) => {
+    const route = s.route || '';
+    return !EXCLUDED_PAGES_ARRAY.includes(route);
+  });
+}
+
+/**
+ * Valida se um shortcut que aponta para uma tela com requisito de recurso
+ * possui os campos resourceId e resourceType preenchidos corretamente.
+ * Retorna true se o shortcut é válido, false caso contrário.
+ */
+function validateShortcutResource(shortcut) {
+  const route = shortcut.route || '';
+  const requirement = SCREEN_RESOURCE_REQUIREMENTS[route];
+
+  // Se a tela não tem requisito de recurso, está válida
+  if (!requirement) {
+    return true;
+  }
+
+  // Se tem requisito, verifica se os campos estão preenchidos
+  const hasResourceId = shortcut.resourceId && String(shortcut.resourceId).trim() !== '';
+  const hasResourceType = shortcut.resourceType && String(shortcut.resourceType).trim() !== '';
+
+  if (!hasResourceId || !hasResourceType) {
+    console.warn(
+      `[CF] Shortcut inválido: rota "${route}" requer resourceId (${shortcut.resourceId}) ` +
+      `e resourceType (${shortcut.resourceType}), mas estão faltando. Descartando.`
+    );
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Aplica todas as validações em uma lista de shortcuts:
+ * 1. Remove páginas excluídas
+ * 2. Remove páginas que exigem recurso mas não o possuem
+ */
+function validateShortcuts(shortcuts) {
+  const afterExclusion = filterExcludedPages(shortcuts);
+  const afterResourceValidation = afterExclusion.filter(validateShortcutResource);
+  return afterResourceValidation;
 }
 
 // ============================================
@@ -386,22 +491,32 @@ function normalizeRecommendation(raw) {
       dashboardId: null,
       cardType: null,
       confidence: 0.0,
-      shortcuts: raw.shortcuts || [],
+      shortcuts: validateShortcuts(raw.shortcuts || []),
     };
   }
+
+  // Normaliza os shortcuts
+  const normalizedShortcuts = (raw.shortcuts || []).slice(0, 4).map((s) => ({
+    route: s.route || s.predicted_target_screen || "",
+    confidence: Math.max(0, Math.min(1, parseFloat(s.confidence || s.prob) || 0.5)),
+    resourceId: s.resourceId || null,
+    resourceType: s.resourceType || null,
+    resourceName: s.resourceName || null,
+  }));
+
+  // Aplica validações: remove páginas excluídas e shortcuts sem recurso obrigatório
+  const validatedShortcuts = validateShortcuts(normalizedShortcuts);
+
+  console.log(
+    `[CF] Shortcuts: ${normalizedShortcuts.length} originais → ${validatedShortcuts.length} após validação`
+  );
 
   return {
     dashboard: dashboardName,
     dashboardId: dashboardId,
     cardType: cardType,
     confidence: Math.max(0, Math.min(1, parseFloat(raw.confidence) || 0)),
-    shortcuts: (raw.shortcuts || []).slice(0, 4).map((s) => ({
-      route: s.route || s.predicted_target_screen || "",
-      confidence: Math.max(0, Math.min(1, parseFloat(s.confidence || s.prob) || 0.5)),
-      resourceId: s.resourceId || null,
-      resourceType: s.resourceType || null,
-      resourceName: s.resourceName || null,
-    })),
+    shortcuts: validatedShortcuts,
   };
 }
 
@@ -713,6 +828,7 @@ exports.adminAdaptiveMode = onRequest(
         batch.set(configRef, configData, { merge: true });
 
         // Se INSTANT e sessionId informado, garante documento de sessão
+        // GRADUAL e STATIC não precisam de sessão
         if (mode === ADAPTIVE_MODES.INSTANT && sessionId) {
           const sessionRef = db.collection('sessionNavigations').doc(sessionId);
           batch.set(sessionRef, {
@@ -721,11 +837,14 @@ exports.adminAdaptiveMode = onRequest(
             startedAt: admin.firestore.FieldValue.serverTimestamp(),
             status: 'active',
           }, { merge: true });
+          console.log(`[Admin] ${userId} → modo ${mode}, sessão criada: ${sessionId}`);
+        } else {
+          console.log(`[Admin] ${userId} → modo ${mode} (sem sessão - apenas INSTANT cria sessão)`);
         }
 
         await batch.commit();
-        console.log(`[Admin] ${userId} → modo ${mode}${sessionId ? `, sessão ${sessionId}` : ''}`);
-        return res.json({ success: true, userId, mode, sessionId });
+        console.log(`[Admin] Config salva: ${userId} → modo ${mode}`);
+        return res.json({ success: true, userId, mode, sessionId: mode === ADAPTIVE_MODES.INSTANT ? sessionId : null });
       }
 
       // DELETE — encerrar sessão e remover config
@@ -774,4 +893,7 @@ Object.assign(module.exports, {
   getSessionNavigations,
   generateInstantRecommendation,
   normalizeRecommendation,
+  filterExcludedPages,
+  validateShortcutResource,
+  validateShortcuts,
 });
