@@ -34,32 +34,37 @@ A função analisa os últimos 30 dias de eventos `navigation_click` e infere:
 # 1. Instalar dependências
 npm install
 
-# 2. Configurar variáveis de ambiente (Firebase Functions config)
-firebase functions:config:set \
-  bigquery.project_id="seu-project-id" \
-  bigquery.analytics_dataset="analytics_123456789"
+# 2. Configurar GitHub Secrets (para deploy automatizado)
+# Veja o guia completo em: GITHUB_SECRETS_SETUP.md
 
-# 3. Ou via .env.local para emulador local
-cp .env.example .env.local
-# editar .env.local com seus valores
+# 3. Para desenvolvimento local, crie um .env baseado no .env.template
+cp .env.template .env
+# editar .env com seus valores
 ```
 
 ## Deploy
 
-```bash
-# Deploy para produção
-npm run deploy
+### Automatizado (Recomendado)
+O deploy é feito automaticamente via GitHub Actions ao fazer push na branch `main`.
 
-# Testar localmente com emulador
-npm run start
+**Configure os secrets no seu repositório GitHub seguindo o guia:** [GITHUB_SECRETS_SETUP.md](GITHUB_SECRETS_SETUP.md)
+
+### Manual
+```bash
+firebase deploy --only functions --project SEU_PROJECT_ID
 ```
 
 ## Variáveis de Ambiente
 
-| Variável | Padrão | Descrição |
-|----------|--------|-----------|
-| `BIGQUERY_PROJECT_ID` | — | GCP Project ID com os dados do Firebase Analytics |
-| `BIGQUERY_ANALYTICS_DATASET` | — | Dataset do Firebase Analytics (formato: `analytics_<APP_ID>`) |
+| Variável | Obrigatório | Descrição |
+|----------|-------------|-----------|
+| `BIGQUERY_PROJECT_ID` | Sim | GCP Project ID com os dados do Firebase Analytics |
+| `BIGQUERY_ANALYTICS_DATASET` | Sim | Dataset do Firebase Analytics (formato: `analytics_<APP_ID>`) |
+| `GEMINI_API_KEY` | Sim | API Key do Gemini para geração de recomendações |
+| `SCHEDULER_SECRET` | Sim | Secret para autenticação de jobs agendados |
+| `ADMIN_KEY` | Sim | Chave para proteger endpoints de administração |
+
+**Todas as variáveis são configuradas via GitHub Secrets e injetadas automaticamente no deploy.**
 
 ## Contrato da API
 

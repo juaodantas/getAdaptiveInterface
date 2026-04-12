@@ -7,7 +7,11 @@
         "node_modules",
         ".git",
         "firebase-debug.log",
-        "firebase-debug.log.*"
+        "firebase-debug.log.*",
+        ".github",
+        ".specs",
+        "tests",
+        "jest.config.js"
       ]
     }
   ],

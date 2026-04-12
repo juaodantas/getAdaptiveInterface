@@ -18,7 +18,8 @@
   "scripts": {
     "start": "firebase serve --only functions",
     "deploy": "firebase deploy --only functions",
-    "test": "jest"
+    "test": "jest",
+    "validate-env": "node validate-env.js"
   },
   "overrides": {
     "@tootallnate/once": "3.0.1"
