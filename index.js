@@ -883,6 +883,484 @@ exports.adminAdaptiveMode = onRequest(
 );
 
 // ============================================
+// FUNCTION 3: batch aggregation — acionada pelo Cloud Scheduler
+// Agrega métricas de eficácia do BigQuery → Firestore
+// Configurar no GCP Cloud Scheduler:
+//   URL: <function_url>/aggregateUserMetrics
+//   Schedule: 0 3 * * * (todo dia às 3h UTC)
+//   Header: x-scheduler-secret: <SCHEDULER_SECRET>
+//   Method: GET
+// ============================================
+
+/**
+ * Agrega métricas de eficácia do BigQuery para cada usuário
+ * e salva no Firestore na collection userMetrics/{userId}.
+ *
+ * Eventos lidos do BigQuery:
+ *   - session_start
+ *   - shortcuts_shown
+ *   - shortcut_clicked
+ *   - dashboard_shown
+ *   - dashboard_changed
+ *   - first_productive_navigation
+ *
+ * Pode ser chamada manualmente (com ADMIN_KEY) ou via Scheduler.
+ */
+exports.aggregateUserMetrics = onRequest(
+  { cors: true },
+  async (req, res) => {
+    // Auth: permite via ADMIN_KEY ou SCHEDULER_SECRET
+    const apiKey =
+      req.headers.authorization?.split('Bearer ')[1] ||
+      req.query?.key ||
+      req.body?.key;
+    const schedulerSecret = req.headers['x-scheduler-secret'];
+    const expectedAdminKey = process.env.ADMIN_KEY;
+
+    const isScheduler = schedulerSecret && schedulerSecret === SCHEDULER_SECRET;
+    const isAdmin = expectedAdminKey && apiKey === expectedAdminKey;
+
+    if (!isScheduler && !isAdmin) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    try {
+      console.log('[Aggregate] Iniciando agregação de métricas...');
+
+      const results = await aggregateMetricsFromBigQuery();
+
+      let usersUpdated = 0;
+      const batch = db.batch();
+
+      for (const userMetric of results) {
+        const ref = db.collection('userMetrics').doc(userMetric.userId);
+        batch.set(ref, {
+          userId: userMetric.userId,
+          mode: userMetric.mode,
+          sessionsCount: userMetric.sessionsCount,
+          shortcutsShown: userMetric.shortcutsShown,
+          shortcutsClicked: userMetric.shortcutsClicked,
+          acceptanceRate: userMetric.acceptanceRate,
+          dashboardShown: userMetric.dashboardShown,
+          dashboardChanged: userMetric.dashboardChanged,
+          passThroughRate: userMetric.passThroughRate,
+          avgTimeToTask: userMetric.avgTimeToTask,
+          lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        usersUpdated++;
+      }
+
+      await batch.commit();
+      console.log(`[Aggregate] ${usersUpdated} usuários atualizados no Firestore`);
+
+      // Após atualizar por usuário, agrega globalmente
+      await aggregateGlobalMetrics();
+
+      return res.json({
+        success: true,
+        usersUpdated,
+        message: `Métricas agregadas para ${usersUpdated} usuários`,
+      });
+    } catch (err) {
+      console.error('[Aggregate] Erro:', err.message);
+      return res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+/**
+ * Query BigQuery para agregar métricas por usuário.
+ * Retorna array de objetos com métricas calculadas.
+ */
+async function aggregateMetricsFromBigQuery() {
+  // Usa a tabela de analytics configurada
+  const eventsTable = `\`${PROJECT_ID}.${ANALYTICS_DATASET}.events_*\``;
+
+  const query = `
+    WITH metric_events AS (
+      SELECT
+        user_id,
+        event_name,
+        event_timestamp,
+        (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'mode') AS mode,
+        (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'session_id') AS session_id,
+        (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'shortcut_routes') AS shortcut_routes,
+        (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'shortcuts_count') AS shortcuts_count,
+        (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'route') AS route,
+        (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'dashboard_id') AS dashboard_id,
+        (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'from_dashboard') AS from_dashboard,
+        (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'to_dashboard') AS to_dashboard,
+        (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'time_to_task_ms') AS time_to_task_ms
+      FROM ${eventsTable}
+      WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
+                              AND FORMAT_DATE('%Y%m%d', CURRENT_DATE())
+        AND event_name IN (
+          'session_start', 'shortcuts_shown', 'shortcut_clicked',
+          'dashboard_shown', 'dashboard_changed', 'first_productive_navigation'
+        )
+    )
+    SELECT
+      user_id,
+      -- Modo mais frequente
+      APPROX_TOP_COUNT(mode, 1)[OFFSET(0)].value AS mode,
+      -- Sessões
+      COUNTIF(event_name = 'session_start') AS sessions_count,
+      -- Shortcuts
+      COALESCE(SUM(CASE WHEN event_name = 'shortcuts_shown' THEN shortcuts_count ELSE 0 END), 0) AS shortcuts_shown,
+      COUNTIF(event_name = 'shortcut_clicked') AS shortcuts_clicked,
+      -- Dashboard
+      COUNTIF(event_name = 'dashboard_shown') AS dashboard_shown,
+      COUNTIF(event_name = 'dashboard_changed') AS dashboard_changed,
+      -- Time to task (média em ms, excluindo valores inválidos)
+      AVG(CASE WHEN event_name = 'first_productive_navigation' AND time_to_task_ms > 0 THEN time_to_task_ms END) AS avg_time_to_task
+    FROM metric_events
+    WHERE user_id IS NOT NULL AND user_id != 'anonymous'
+    GROUP BY user_id
+  `;
+
+  console.log('[Aggregate] Executando query BigQuery...');
+  const [job] = await bigquery.createQuery({ query }).getQueryResults();
+
+  return job.map((row) => {
+    const shortcutsShown = Number(row.shortcuts_shown) || 0;
+    const shortcutsClicked = Number(row.shortcuts_clicked) || 0;
+    const dashboardShown = Number(row.dashboard_shown) || 0;
+    const dashboardChanged = Number(row.dashboard_changed) || 0;
+    const sessionsCount = Number(row.sessions_count) || 0;
+    const avgTimeToTask = row.avg_time_to_task
+      ? Number(row.avg_time_to_task)
+      : null;
+
+    // Aceitance rate: cliques / exibidos (null se zero exibidos)
+    const acceptanceRate = shortcutsShown > 0
+      ? shortcutsClicked / shortcutsShown
+      : null;
+
+    // Pass-through rate: mudanças / exibidos (null se zero exibidos)
+    const passThroughRate = dashboardShown > 0
+      ? dashboardChanged / dashboardShown
+      : null;
+
+    return {
+      userId: row.user_id,
+      mode: row.mode || 'GRADUAL',
+      sessionsCount,
+      shortcutsShown,
+      shortcutsClicked,
+      acceptanceRate: acceptanceRate !== null ? Math.round(acceptanceRate * 1000) / 1000 : null,
+      dashboardShown,
+      dashboardChanged,
+      passThroughRate: passThroughRate !== null ? Math.round(passThroughRate * 1000) / 1000 : null,
+      avgTimeToTask: avgTimeToTask !== null ? Math.round(avgTimeToTask) : null,
+    };
+  });
+}
+
+/**
+ * Agrega métricas globais de todos os usuários e salva em aggregateMetrics/global.
+ * Inclui breakdown por modo para comparação.
+ */
+async function aggregateGlobalMetrics() {
+  const userMetricsSnap = await db.collection('userMetrics').get();
+
+  if (userMetricsSnap.empty) {
+    console.log('[Aggregate Global] Sem dados de usuário para agregar');
+    return;
+  }
+
+  const allMetrics = [];
+  const byMode = { STATIC: [], GRADUAL: [], INSTANT: [] };
+
+  userMetricsSnap.forEach((doc) => {
+    const data = doc.data();
+    allMetrics.push(data);
+
+    const mode = data.mode || 'GRADUAL';
+    if (byMode[mode]) {
+      byMode[mode].push(data);
+    }
+  });
+
+  // Helpers para calcular médias
+  const avg = (arr, key) => {
+    const vals = arr.map((x) => x[key]).filter((v) => v !== null && v !== undefined);
+    if (vals.length === 0) return null;
+    return Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 1000) / 1000;
+  };
+
+  const sum = (arr, key) => arr.reduce((a, b) => a + ((b[key] || 0)), 0);
+
+  const global = {
+    totalUsers: allMetrics.length,
+    totalSessions: sum(allMetrics, 'sessionsCount'),
+    globalAcceptanceRate: avg(allMetrics, 'acceptanceRate'),
+    globalPassThroughRate: avg(allMetrics, 'passThroughRate'),
+    globalAvgTimeToTask: avg(allMetrics, 'avgTimeToTask'),
+    byMode: {},
+    lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  // Breakdown por modo
+  for (const [mode, users] of Object.entries(byMode)) {
+    if (users.length === 0) continue;
+    global.byMode[mode] = {
+      usersCount: users.length,
+      totalSessions: sum(users, 'sessionsCount'),
+      acceptanceRate: avg(users, 'acceptanceRate'),
+      passThroughRate: avg(users, 'passThroughRate'),
+      avgTimeToTask: avg(users, 'avgTimeToTask'),
+    };
+  }
+
+  await db.collection('aggregateMetrics').doc('global').set(global, { merge: true });
+  console.log('[Aggregate Global] Métricas globais salvas:', JSON.stringify(global, null, 2));
+}
+
+// ============================================
+// METRICS API — Endpoints de consulta de métricas
+// ============================================
+
+/**
+ * Endpoints HTTP para consultar métricas de eficácia.
+ *
+ * GET /metrics                  — métricas globais agregadas
+ * GET /metrics?userId=xxx       — métricas de um usuário
+ * GET /metrics/users            — lista resumida de todos os usuários
+ * GET /metrics/compare?modeA=X&modeB=Y — comparação entre modos
+ * GET /metrics/export?format=csv|json  — export de dados brutos
+ *
+ * Auth: Authorization: Bearer <ADMIN_KEY> ou ?key=<ADMIN_KEY>
+ */
+exports.metricsApi = onRequest(
+  { cors: true },
+  async (req, res) => {
+    // Auth
+    const apiKey =
+      req.headers.authorization?.split('Bearer ')[1] ||
+      req.query?.key;
+    const expectedKey = process.env.ADMIN_KEY;
+
+    if (!expectedKey || apiKey !== expectedKey) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    if (req.method !== 'GET') {
+      return res.status(405).json({ error: 'Method not allowed' });
+    }
+
+    try {
+      const path = req.path || '';
+      const query = req.query || {};
+
+      // Roteamento interno
+      if (path === '/users' || query.path === 'users') {
+        return handleListUsers(res);
+      }
+
+      if (path === '/compare' || query.path === 'compare') {
+        return handleCompareModes(res, query);
+      }
+
+      if (path === '/export' || query.path === 'export') {
+        return handleExportData(res, query);
+      }
+
+      // Default: métricas globais ou por usuário
+      if (query.userId) {
+        return handleUserMetrics(res, query.userId);
+      }
+
+      return handleGlobalMetrics(res);
+    } catch (err) {
+      console.error('[Metrics API] Erro:', err.message);
+      return res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+/** Re-agrega métricas do BigQuery se necessário. Retorna true se agregou. */
+async function _ensureFreshMetrics() {
+  const globalDoc = await db.collection('aggregateMetrics').doc('global').get();
+  const needsRefresh = !globalDoc.exists || _isDataStale(globalDoc.data());
+
+  if (!needsRefresh) return false;
+
+  console.log('[Metrics API] Dados stale ou inexistentes, rodando agregação...');
+  try {
+    const results = await aggregateMetricsFromBigQuery();
+    if (results.length > 0) {
+      const batch = db.batch();
+      for (const userMetric of results) {
+        const ref = db.collection('userMetrics').doc(userMetric.userId);
+        batch.set(ref, {
+          userId: userMetric.userId,
+          mode: userMetric.mode,
+          sessionsCount: userMetric.sessionsCount,
+          shortcutsShown: userMetric.shortcutsShown,
+          shortcutsClicked: userMetric.shortcutsClicked,
+          acceptanceRate: userMetric.acceptanceRate,
+          dashboardShown: userMetric.dashboardShown,
+          dashboardChanged: userMetric.dashboardChanged,
+          passThroughRate: userMetric.passThroughRate,
+          avgTimeToTask: userMetric.avgTimeToTask,
+          lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
+      await batch.commit();
+      await aggregateGlobalMetrics();
+    }
+    return true;
+  } catch (err) {
+    console.error('[Metrics API] Erro na agregação automática:', err.message);
+    return false;
+  }
+}
+
+async function handleGlobalMetrics(res) {
+  await _ensureFreshMetrics();
+
+  const globalDoc = await db.collection('aggregateMetrics').doc('global').get();
+  if (!globalDoc.exists) {
+    return res.json({
+      totalUsers: 0,
+      totalSessions: 0,
+      globalAcceptanceRate: null,
+      globalPassThroughRate: null,
+      globalAvgTimeToTask: null,
+      byMode: {},
+      message: 'Sem dados disponíveis. Eventos de métrica ainda não foram coletados.',
+    });
+  }
+
+  return res.json(globalDoc.data());
+}
+
+async function handleUserMetrics(res, userId) {
+  await _ensureFreshMetrics();
+
+  const userDoc = await db.collection('userMetrics').doc(userId).get();
+  if (!userDoc.exists) {
+    return res.status(404).json({ error: `User ${userId} not found in metrics` });
+  }
+
+  return res.json(userDoc.data());
+}
+
+/** Dados são considerados stale se lastUpdated tem mais de 24h */
+function _isDataStale(data) {
+  if (!data || !data.lastUpdated) return true;
+  try {
+    const lastUpdated = data.lastUpdated.toDate ? data.lastUpdated.toDate() : new Date(data.lastUpdated);
+    const hoursSinceUpdate = (Date.now() - lastUpdated.getTime()) / (1000 * 60 * 60);
+    return hoursSinceUpdate > 24;
+  } catch {
+    return true;
+  }
+}
+
+async function handleListUsers(res) {
+  const usersSnap = await db.collection('userMetrics').orderBy('lastUpdated', 'desc').get();
+
+  const users = usersSnap.docs.map((doc) => {
+    const data = doc.data();
+    return {
+      userId: data.userId,
+      mode: data.mode,
+      sessionsCount: data.sessionsCount,
+      acceptanceRate: data.acceptanceRate,
+      passThroughRate: data.passThroughRate,
+      avgTimeToTask: data.avgTimeToTask,
+      lastUpdated: data.lastUpdated?.toDate?.()?.toISOString() || null,
+    };
+  });
+
+  return res.json(users);
+}
+
+async function handleCompareModes(res, query) {
+  const globalDoc = await db.collection('aggregateMetrics').doc('global').get();
+
+  if (!globalDoc.exists || !globalDoc.data()?.byMode) {
+    return res.json({ error: 'Sem dados para comparação' });
+  }
+
+  const byMode = globalDoc.data().byMode;
+  const modeA = query.modeA;
+  const modeB = query.modeB;
+
+  if (modeA && modeB) {
+    // Comparação específica entre dois modos
+    return res.json({
+      modeA: { mode: modeA, ...(byMode[modeA] || { message: 'Sem dados' }) },
+      modeB: { mode: modeB, ...(byMode[modeB] || { message: 'Sem dados' }) },
+    });
+  }
+
+  // Retorna todos os modos disponíveis
+  return res.json(byMode);
+}
+
+async function handleExportData(res, query) {
+  const format = (query.format || 'json').toLowerCase();
+  const { userId, mode, dateFrom, dateTo, limit, offset } = query;
+
+  let usersSnap = db.collection('userMetrics');
+
+  // Filtros
+  if (userId) {
+    usersSnap = usersSnap.where('userId', '==', userId);
+  }
+  if (mode) {
+    usersSnap = usersSnap.where('mode', '==', mode);
+  }
+
+  usersSnap = usersSnap.orderBy('lastUpdated', 'desc');
+
+  // Paginação
+  const limitNum = parseInt(limit) || 1000;
+  const offsetNum = parseInt(offset) || 0;
+  usersSnap = usersSnap.limit(limitNum);
+
+  const snap = await usersSnap.get();
+  const data = snap.docs.map((doc) => doc.data());
+
+  if (format === 'csv') {
+    const headers = [
+      'userId', 'mode', 'sessionsCount', 'shortcutsShown', 'shortcutsClicked',
+      'acceptanceRate', 'dashboardShown', 'dashboardChanged', 'passThroughRate',
+      'avgTimeToTask',
+    ];
+
+    const csvRows = [
+      headers.join(','),
+      ...data.map((row) =>
+        headers.map((h) => {
+          const val = row[h];
+          // Escape CSV: strings com vírgulas ou aspas
+          if (val === null || val === undefined) return '';
+          const str = String(val);
+          if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+            return `"${str.replace(/"/g, '""')}"`;
+          }
+          return str;
+        }).join(',')
+      ),
+    ].join('\n');
+
+    res.set('Content-Type', 'text/csv');
+    res.set('Content-Disposition', 'attachment; filename=adaptation_metrics_export.csv');
+    return res.send(csvRows);
+  }
+
+  return res.json({
+    total: data.length,
+    filters: { userId, mode, dateFrom, dateTo },
+    pagination: { limit: limitNum, offset: offsetNum },
+    data,
+  });
+}
+
+// ============================================
 // EXPORTS
 // ============================================
 
@@ -896,4 +1374,6 @@ Object.assign(module.exports, {
   filterExcludedPages,
   validateShortcutResource,
   validateShortcuts,
+  aggregateMetricsFromBigQuery,
+  aggregateGlobalMetrics,
 });
