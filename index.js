@@ -1019,9 +1019,9 @@ async function aggregateMetricsFromBigQuery() {
   `;
 
   console.log('[Aggregate] Executando query BigQuery...');
-  const [job] = await bigquery.createQuery({ query }).getQueryResults();
+  const [rows] = await bigquery.query({ query, location: "US" });
 
-  return job.map((row) => {
+  return rows.map((row) => {
     const shortcutsShown = Number(row.shortcuts_shown) || 0;
     const shortcutsClicked = Number(row.shortcuts_clicked) || 0;
     const dashboardShown = Number(row.dashboard_shown) || 0;
