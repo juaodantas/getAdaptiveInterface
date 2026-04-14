@@ -927,14 +927,70 @@ exports.aggregateUserMetrics = onRequest(
     try {
       console.log('[Aggregate] Iniciando agregação de métricas...');
 
-      const results = await aggregateMetricsFromBigQuery();
+      // 1. Agrega métricas do BigQuery (eventos de analytics)
+      const bqResults = await aggregateMetricsFromBigQuery();
 
+      // 2. Agrega métricas do Firestore (sessionNavigations)
+      const navMetrics = await aggregateSessionNavigationsMetrics();
+
+      // 3. Mescla os dados: BigQuery como base, complementa com Firestore
+      //    Para usuários que existem em ambas fontes, os dados do Firestore
+      //    complementam (não substituem) os do BigQuery.
+      const mergedMetrics = new Map();
+
+      // Adiciona resultados do BigQuery como base
+      for (const metric of bqResults) {
+        mergedMetrics.set(metric.userId, { ...metric });
+      }
+
+      // Complementa/mescla com dados do Firestore
+      for (const [userId, navData] of Object.entries(navMetrics)) {
+        const existing = mergedMetrics.get(userId);
+
+        if (existing) {
+          // Usuário já tem dados no BigQuery — complementa apenas.
+          // O mode NUNCA é sobrescrito pelo Firestore. O BigQuery é a fonte
+          // primária para o modo (APPROX_TOP_COUNT dos eventos analytics).
+          // Os dados do Firestore são SEMPRE de sessões INSTANT e apenas
+          // enriquecem as métricas, sem alterar o modo do usuário.
+
+          // Usa o maior sessionsCount entre as duas fontes (evita undercount)
+          existing.sessionsCount = Math.max(existing.sessionsCount, navData.sessionsCount);
+
+          // Adiciona campos específicos do Firestore (dados SEMPRE INSTANT)
+          existing.navigationsFromSessions = navData.totalNavigations;
+          existing.uniqueScreensFromSessions = navData.uniqueScreensCount;
+          existing.avgSessionDurationMs = navData.avgSessionDurationMs;
+          existing.topScreensFromSessions = navData.topScreens;
+        } else {
+          // Usuário só existe no Firestore (INSTANT puro, sem eventos no BigQuery)
+          mergedMetrics.set(userId, {
+            userId,
+            mode: 'INSTANT', // mode = INSTANT apenas quando a única fonte é o Firestore
+            sessionsCount: navData.sessionsCount,
+            shortcutsShown: 0,
+            shortcutsClicked: 0,
+            acceptanceRate: null,
+            dashboardShown: 0,
+            dashboardChanged: 0,
+            passThroughRate: null,
+            avgTimeToTask: null,
+            // Campos do Firestore (SEMPRE dados de sessões INSTANT)
+            navigationsFromSessions: navData.totalNavigations,
+            uniqueScreensFromSessions: navData.uniqueScreensCount,
+            avgSessionDurationMs: navData.avgSessionDurationMs,
+            topScreensFromSessions: navData.topScreens,
+          });
+        }
+      }
+
+      // 4. Salva tudo no Firestore
       let usersUpdated = 0;
       const batch = db.batch();
 
-      for (const userMetric of results) {
+      for (const [, userMetric] of mergedMetrics) {
         const ref = db.collection('userMetrics').doc(userMetric.userId);
-        batch.set(ref, {
+        const dataToSave = {
           userId: userMetric.userId,
           mode: userMetric.mode,
           sessionsCount: userMetric.sessionsCount,
@@ -945,8 +1001,14 @@ exports.aggregateUserMetrics = onRequest(
           dashboardChanged: userMetric.dashboardChanged,
           passThroughRate: userMetric.passThroughRate,
           avgTimeToTask: userMetric.avgTimeToTask,
+          // Campos do Firestore (sessionNavigations)
+          navigationsFromSessions: userMetric.navigationsFromSessions || 0,
+          uniqueScreensFromSessions: userMetric.uniqueScreensFromSessions || 0,
+          avgSessionDurationMs: userMetric.avgSessionDurationMs || null,
+          topScreensFromSessions: userMetric.topScreensFromSessions || [],
           lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-        }, { merge: true });
+        };
+        batch.set(ref, dataToSave, { merge: true });
         usersUpdated++;
       }
 
@@ -967,6 +1029,121 @@ exports.aggregateUserMetrics = onRequest(
     }
   },
 );
+
+/**
+ * Agrega métricas de sessões do Firestore (collection sessionNavigations).
+ * Complementa os dados do BigQuery, especialmente para usuários INSTANT
+ * cujas sessões podem não ter eventos completos no analytics.
+ *
+ * Retorna map: userId → { sessionsCount, totalNavigations, avgSessionDuration, ... }
+ */
+async function aggregateSessionNavigationsMetrics() {
+  console.log('[Aggregate-Navigations] Buscando sessões completadas do Firestore...');
+
+  // Busca sessões completadas (encerradas) dos últimos 30 dias
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+  const sessionsSnap = await db
+    .collection('sessionNavigations')
+    .where('status', '==', 'completed')
+    .get();
+
+  if (sessionsSnap.empty) {
+    console.log('[Aggregate-Navigations] Nenhuma sessão completada encontrada');
+    return {};
+  }
+
+  console.log(`[Aggregate-Navigations] ${sessionsSnap.size} sessões completadas encontradas`);
+
+  // Agrega por usuário
+  const userMetrics = {};
+
+  for (const sessionDoc of sessionsSnap.docs) {
+    const sessionData = sessionDoc.data();
+    const userId = sessionData.userId;
+    const sessionId = sessionData.sessionId || sessionDoc.id;
+
+    if (!userId || userId === 'anonymous') continue;
+
+    // Inicializa métricas do usuário se necessário
+    if (!userMetrics[userId]) {
+      userMetrics[userId] = {
+        userId,
+        mode: 'INSTANT',
+        sessionsCount: 0,
+        totalNavigations: 0,
+        uniqueScreens: new Set(),
+        screenFrequency: {},
+        totalDurationMs: 0,
+        sessionsWithDuration: 0,
+      };
+    }
+
+    userMetrics[userId].sessionsCount++;
+
+    // Busca navegações da subcoleção
+    const navsSnap = await db
+      .collection('sessionNavigations')
+      .doc(sessionId)
+      .collection('navigations')
+      .orderBy('timestamp', 'asc')
+      .get();
+
+    const navs = navsSnap.docs.map((d) => d.data());
+
+    if (navs.length > 0) {
+      userMetrics[userId].totalNavigations += navs.length;
+
+      // Conta telas visitadas
+      navs.forEach((nav) => {
+        const screen = nav.screen || nav.route || nav.targetScreen;
+        if (screen) {
+          userMetrics[userId].uniqueScreens.add(screen);
+          userMetrics[userId].screenFrequency[screen] =
+            (userMetrics[userId].screenFrequency[screen] || 0) + 1;
+        }
+      });
+
+      // Calcula duração da sessão (diferença entre último e primeiro timestamp)
+      const firstTs = navs[0].timestamp?.toDate?.();
+      const lastTs = navs[navs.length - 1].timestamp?.toDate?.();
+
+      if (firstTs && lastTs && lastTs > firstTs) {
+        const durationMs = lastTs.getTime() - firstTs.getTime();
+        userMetrics[userId].totalDurationMs += durationMs;
+        userMetrics[userId].sessionsWithDuration++;
+      }
+    }
+  }
+
+  // Converte para formato serializável
+  const result = {};
+  for (const [userId, metrics] of Object.entries(userMetrics)) {
+    const topScreens = Object.entries(metrics.screenFrequency)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([screen, count]) => ({ screen, count }));
+
+    result[userId] = {
+      userId,
+      mode: metrics.mode,
+      sessionsCount: metrics.sessionsCount,
+      totalNavigations: metrics.totalNavigations,
+      uniqueScreensCount: metrics.uniqueScreens.size,
+      avgNavigationsPerSession: metrics.sessionsCount > 0
+        ? Math.round((metrics.totalNavigations / metrics.sessionsCount) * 10) / 10
+        : 0,
+      avgSessionDurationMs: metrics.sessionsWithDuration > 0
+        ? Math.round(metrics.totalDurationMs / metrics.sessionsWithDuration)
+        : null,
+      topScreens,
+    };
+  }
+
+  console.log(`[Aggregate-Navigations] Métricas agregadas para ${Object.keys(result).length} usuários`);
+  return result;
+}
 
 /**
  * Query BigQuery para agregar métricas por usuário.
@@ -1187,10 +1364,49 @@ async function _ensureFreshMetrics() {
 
   console.log('[Metrics API] Dados stale ou inexistentes, rodando agregação...');
   try {
-    const results = await aggregateMetricsFromBigQuery();
-    if (results.length > 0) {
+    const bqResults = await aggregateMetricsFromBigQuery();
+    const navMetrics = await aggregateSessionNavigationsMetrics();
+
+    // Mescla os dados (mesma lógica do handler principal)
+    const mergedMetrics = new Map();
+
+    for (const metric of bqResults) {
+      mergedMetrics.set(metric.userId, { ...metric });
+    }
+
+    for (const [userId, navData] of Object.entries(navMetrics)) {
+      const existing = mergedMetrics.get(userId);
+      if (existing) {
+        // Mode NUNCA é sobrescrito pelo Firestore — BigQuery é a fonte primária
+        existing.sessionsCount = Math.max(existing.sessionsCount, navData.sessionsCount);
+        existing.navigationsFromSessions = navData.totalNavigations;
+        existing.uniqueScreensFromSessions = navData.uniqueScreensCount;
+        existing.avgSessionDurationMs = navData.avgSessionDurationMs;
+        existing.topScreensFromSessions = navData.topScreens;
+      } else {
+        // Usuário só no Firestore → exclusivamente INSTANT
+        mergedMetrics.set(userId, {
+          userId,
+          mode: 'INSTANT',
+          sessionsCount: navData.sessionsCount,
+          shortcutsShown: 0,
+          shortcutsClicked: 0,
+          acceptanceRate: null,
+          dashboardShown: 0,
+          dashboardChanged: 0,
+          passThroughRate: null,
+          avgTimeToTask: null,
+          navigationsFromSessions: navData.totalNavigations,
+          uniqueScreensFromSessions: navData.uniqueScreensCount,
+          avgSessionDurationMs: navData.avgSessionDurationMs,
+          topScreensFromSessions: navData.topScreens,
+        });
+      }
+    }
+
+    if (mergedMetrics.size > 0) {
       const batch = db.batch();
-      for (const userMetric of results) {
+      for (const [, userMetric] of mergedMetrics) {
         const ref = db.collection('userMetrics').doc(userMetric.userId);
         batch.set(ref, {
           userId: userMetric.userId,
@@ -1203,6 +1419,10 @@ async function _ensureFreshMetrics() {
           dashboardChanged: userMetric.dashboardChanged,
           passThroughRate: userMetric.passThroughRate,
           avgTimeToTask: userMetric.avgTimeToTask,
+          navigationsFromSessions: userMetric.navigationsFromSessions || 0,
+          uniqueScreensFromSessions: userMetric.uniqueScreensFromSessions || 0,
+          avgSessionDurationMs: userMetric.avgSessionDurationMs || null,
+          topScreensFromSessions: userMetric.topScreensFromSessions || [],
           lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
         }, { merge: true });
       }
@@ -1374,6 +1594,7 @@ Object.assign(module.exports, {
   filterExcludedPages,
   validateShortcutResource,
   validateShortcuts,
+  aggregateSessionNavigationsMetrics,
   aggregateMetricsFromBigQuery,
   aggregateGlobalMetrics,
 });
