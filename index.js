@@ -56,6 +56,8 @@ const SCREEN_RESOURCE_REQUIREMENTS = {
   // '/gerenciarEquipePage' → opcional
 };
 
+const SAFE_LOTE_FALLBACK_ROUTE = '/areaCultivoPage';
+
 const USER_ID_SQL = `
   COALESCE(
     (SELECT value.string_value FROM UNNEST(user_properties) WHERE key = 'user_id'),
@@ -141,15 +143,149 @@ async function getSessionNavigations(sessionId) {
 
 function getDefaultShortcuts() {
   return [
-    { route: '/lotePage', confidence: 0.5 },
+    { route: SAFE_LOTE_FALLBACK_ROUTE, confidence: 0.5 },
     { route: '/solucaoPage', confidence: 0.5 },
     { route: '/agendaPage', confidence: 0.5 },
     { route: '/reservatoriosPage', confidence: 0.5 },
   ];
 }
 
+function normalizeNonEmptyString(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
+function resolveEffectiveSessionId(requestSessionId, userConfig) {
+  return normalizeNonEmptyString(requestSessionId) || normalizeNonEmptyString(userConfig?.sessionId);
+}
+
+function normalizeInstantNavigation(nav) {
+  if (!nav || typeof nav !== 'object') {
+    return null;
+  }
+
+  const screen = normalizeNonEmptyString(nav.screen)
+    || normalizeNonEmptyString(nav.route)
+    || normalizeNonEmptyString(nav.targetScreen);
+
+  if (!screen) {
+    return null;
+  }
+
+  const normalized = { screen };
+  const resourceId = normalizeNonEmptyString(nav.resourceId);
+  const resourceType = normalizeNonEmptyString(nav.resourceType);
+  const resourceName = normalizeNonEmptyString(nav.resourceName);
+
+  if (resourceId) normalized.resourceId = resourceId;
+  if (resourceType) normalized.resourceType = resourceType;
+  if (resourceName) normalized.resourceName = resourceName;
+  if (nav.timestamp !== undefined) normalized.timestamp = nav.timestamp;
+
+  return normalized;
+}
+
+function formatInstantResourceDetails(resource) {
+  const details = [];
+
+  if (resource.resourceType && resource.resourceId) {
+    details.push(`${resource.resourceType}#${resource.resourceId}`);
+  } else {
+    if (resource.resourceType) details.push(`resourceType=${resource.resourceType}`);
+    if (resource.resourceId) details.push(`resourceId=${resource.resourceId}`);
+  }
+
+  if (resource.resourceName) {
+    details.push(`"${resource.resourceName}"`);
+  }
+
+  return details.join(' ');
+}
+
+function buildInstantHistoryText(normalizedNavigations) {
+  const byScreen = new Map();
+
+  normalizedNavigations.forEach((nav) => {
+    const entry = byScreen.get(nav.screen) || { count: 0, resources: new Map() };
+    entry.count += 1;
+
+    if (nav.resourceId || nav.resourceType || nav.resourceName) {
+      const details = formatInstantResourceDetails(nav);
+      if (details) {
+        entry.resources.set(details, details);
+      }
+    }
+
+    byScreen.set(nav.screen, entry);
+  });
+
+  return [...byScreen.entries()]
+    .sort((a, b) => b[1].count - a[1].count || a[0].localeCompare(b[0]))
+    .slice(0, 10)
+    .map(([screen, entry]) => {
+      const resources = [...entry.resources.values()].sort();
+      const resourcesText = resources.length > 0
+        ? ` | resources: ${resources.join('; ')}`
+        : '';
+      return `${screen} | visitas=${entry.count}x${resourcesText}`;
+    })
+    .join('\n');
+}
+
+function findRealLoteResourceFromInstantNavigations(normalizedNavigations) {
+  const loteNavigation = normalizedNavigations.find((nav) => (
+    nav.screen === '/lotePage' && hasRealLoteResource(nav)
+  ));
+
+  if (!loteNavigation) {
+    return null;
+  }
+
+  const resource = {
+    resourceId: loteNavigation.resourceId,
+    resourceType: loteNavigation.resourceType,
+  };
+
+  if (loteNavigation.resourceName) {
+    resource.resourceName = loteNavigation.resourceName;
+  }
+
+  return resource;
+}
+
+function enrichInstantLoteShortcutsWithHistory(shortcuts, normalizedNavigations) {
+  const loteResource = findRealLoteResourceFromInstantNavigations(normalizedNavigations);
+
+  if (!loteResource) {
+    return shortcuts;
+  }
+
+  return shortcuts.map((shortcut) => {
+    if (!shortcut || typeof shortcut !== 'object') {
+      return shortcut;
+    }
+
+    if (shortcut.route !== '/lotePage' || hasRealLoteResource(shortcut)) {
+      return shortcut;
+    }
+
+    return {
+      ...shortcut,
+      ...loteResource,
+    };
+  });
+}
+
 async function generateInstantRecommendation(navigations, hour, dayOfWeek) {
-  if (!navigations || navigations.length === 0) {
+  const normalizedNavigations = (navigations || [])
+    .map(normalizeInstantNavigation)
+    .filter(Boolean);
+
+  if (normalizedNavigations.length === 0) {
     console.log('[CF] INSTANT: Nenhuma navegação na sessão');
     return {
       dashboard: null,
@@ -160,22 +296,9 @@ async function generateInstantRecommendation(navigations, hour, dayOfWeek) {
     };
   }
 
-  const navCount = navigations.length;
+  const navCount = normalizedNavigations.length;
   const maxConfidence = navCount < 10 ? Math.min(0.5, navCount * 0.05) : 0.5;
-
-  const screenCounts = {};
-  navigations.forEach((nav) => {
-    const screen = nav.screen;
-    screenCounts[screen] = (screenCounts[screen] || 0) + 1;
-  });
-
-  const sortedScreens = Object.entries(screenCounts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10);
-
-  const historyText = sortedScreens
-    .map(([screen, count]) => `${screen} | visitas=${count}x`)
-    .join('\n');
+  const historyText = buildInstantHistoryText(normalizedNavigations);
 
   const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
   const model = genAI.getGenerativeModel({ model: 'gemini-3.1-flash-lite-preview' });
@@ -215,7 +338,7 @@ IMPORTANTE:
 ${screensRequiringResource}
 
 Com base nas navegações desta sessão, retorne APENAS JSON válido sem markdown:
-{"dashboard":"nome do dashboard ou null","dashboardId":"ID_TECNICO","cardType":"tipo_do_card","confidence":0.0,"shortcuts":[{"route":"/tela","confidence":0.0}]}
+{"dashboard":"nome do dashboard ou null","dashboardId":"ID_TECNICO","cardType":"tipo_do_card","confidence":0.0,"shortcuts":[{"route":"/tela","confidence":0.0,"resourceId":"id opcional","resourceType":"tipo opcional","resourceName":"nome opcional"}]}
 
 Regras:
 - dashboard deve ser um dos valores válidos: ${validDashboardNames}
@@ -239,6 +362,9 @@ Regras:
       .trim();
 
     const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === 'object') {
+      parsed.shortcuts = enrichInstantLoteShortcutsWithHistory(parsed.shortcuts || [], normalizedNavigations);
+    }
     const recommendation = normalizeRecommendation(parsed);
 
     recommendation.confidence = Math.min(recommendation.confidence, maxConfidence);
@@ -433,13 +559,39 @@ function validateShortcutResource(shortcut) {
   return true;
 }
 
+function hasRealLoteResource(shortcut) {
+  return Boolean(
+    normalizeNonEmptyString(shortcut.resourceId)
+    && normalizeNonEmptyString(shortcut.resourceType) === 'lote'
+  );
+}
+
+function sanitizeShortcutRouteResource(shortcut) {
+  if (!shortcut || typeof shortcut !== 'object') {
+    return shortcut;
+  }
+
+  if (shortcut.route !== '/lotePage' || hasRealLoteResource(shortcut)) {
+    return shortcut;
+  }
+
+  return {
+    ...shortcut,
+    route: SAFE_LOTE_FALLBACK_ROUTE,
+    resourceId: null,
+    resourceType: null,
+    resourceName: null,
+  };
+}
+
 /**
  * Aplica todas as validações em uma lista de shortcuts:
  * 1. Remove páginas excluídas
  * 2. Remove páginas que exigem recurso mas não o possuem
  */
 function validateShortcuts(shortcuts) {
-  const afterExclusion = filterExcludedPages(shortcuts);
+  const sanitizedShortcuts = shortcuts.map(sanitizeShortcutRouteResource);
+  const afterExclusion = filterExcludedPages(sanitizedShortcuts);
   const afterResourceValidation = afterExclusion.filter(validateShortcutResource);
   return afterResourceValidation;
 }
@@ -568,13 +720,17 @@ exports.getAdaptiveInterface = onCall(async (request) => {
       : new Date().getHours();
   const dayOfWeek = new Date().getDay() + 1;
 
-  let mode = data.mode || null;
-  const sessionId = data.sessionId || null;
+  const requestMode = data.mode || null;
+  const requestSessionId = data.sessionId || null;
+  const requestHasSessionId = Boolean(normalizeNonEmptyString(requestSessionId));
+  const shouldFetchUserConfig = !requestMode
+    || (requestMode === ADAPTIVE_MODES.INSTANT && !requestHasSessionId);
+  const userConfig = shouldFetchUserConfig
+    ? await getUserConfig(userId)
+    : null;
 
-  if (!mode) {
-    const userConfig = await getUserConfig(userId);
-    mode = userConfig?.mode || ADAPTIVE_MODES.GRADUAL;
-  }
+  let mode = requestMode || userConfig?.mode || ADAPTIVE_MODES.GRADUAL;
+  const sessionId = resolveEffectiveSessionId(requestSessionId, userConfig);
 
   if (!Object.values(ADAPTIVE_MODES).includes(mode)) {
     console.warn(`[CF] Modo inválido "${mode}", usando GRADUAL`);
@@ -1590,6 +1746,12 @@ Object.assign(module.exports, {
   getUserConfig,
   getSessionNavigations,
   generateInstantRecommendation,
+  enrichInstantLoteShortcutsWithHistory,
+  findRealLoteResourceFromInstantNavigations,
+  normalizeInstantNavigation,
+  buildInstantHistoryText,
+  resolveEffectiveSessionId,
+  sanitizeShortcutRouteResource,
   normalizeRecommendation,
   filterExcludedPages,
   validateShortcutResource,
