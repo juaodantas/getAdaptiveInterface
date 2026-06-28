@@ -27,6 +27,20 @@ const ADAPTIVE_MODES = {
   GRADUAL: 'GRADUAL',
 };
 
+const VISUAL_PRIORITIES = {
+  NONE: 'none',
+  WEAK: 'weak',
+  MODERATE: 'moderate',
+  STRONG: 'strong',
+};
+
+const ADAPTIVE_SOURCES = {
+  ADAPTIVE: 'adaptive',
+  SYSTEM: 'system',
+  FALLBACK: 'fallback',
+  INSUFFICIENT_DATA: 'insufficient_data',
+};
+
 const EXCLUDED_PAGES_SQL = `
   '/modulosPage', '/splashPage', '/loginPage', '/homePage',
   '/cadastroPage', '/recuperarSenha', '/codigoSeguranca', '/novaSenha',
@@ -159,6 +173,87 @@ function normalizeNonEmptyString(value) {
   return trimmed === '' ? null : trimmed;
 }
 
+function hasValidCardType(cardType) {
+  return Object.values(DASHBOARD_CONFIG).some((config) => config.cardType === cardType);
+}
+
+function visualPriorityForMode(mode, confidence, hasRecommendation) {
+  if (!hasRecommendation || mode === ADAPTIVE_MODES.STATIC) {
+    return VISUAL_PRIORITIES.NONE;
+  }
+
+  if (mode === ADAPTIVE_MODES.INSTANT) {
+    return VISUAL_PRIORITIES.WEAK;
+  }
+
+  if (confidence >= 0.85) return VISUAL_PRIORITIES.STRONG;
+  if (confidence >= 0.7) return VISUAL_PRIORITIES.MODERATE;
+  if (confidence >= 0.4) return VISUAL_PRIORITIES.WEAK;
+  return VISUAL_PRIORITIES.NONE;
+}
+
+function reasonForCardType(cardType, mode) {
+  if (!hasValidCardType(cardType)) {
+    return null;
+  }
+
+  const prefix = mode === ADAPTIVE_MODES.INSTANT ? 'Uso recente' : 'Padrão de uso';
+  const labels = {
+    tarefas: 'tarefas',
+    lotes: 'cultivo',
+    producao: 'produção',
+    saude: 'atenção operacional',
+  };
+
+  return `${prefix}: ${labels[cardType]}`;
+}
+
+function withAdaptiveMetadata(recommendation, mode, sourceOverride) {
+  const hasRecommendation = hasValidCardType(recommendation.cardType);
+  const confidence = Math.max(0, Math.min(1, parseFloat(recommendation.confidence) || 0));
+  let source = sourceOverride || recommendation.source;
+
+  if (!source) {
+    source = hasRecommendation ? ADAPTIVE_SOURCES.ADAPTIVE : ADAPTIVE_SOURCES.INSUFFICIENT_DATA;
+  }
+
+  return {
+    ...recommendation,
+    confidence,
+    source,
+    visualPriority: visualPriorityForMode(mode, confidence, hasRecommendation),
+    reason: reasonForCardType(recommendation.cardType, mode),
+  };
+}
+
+function fallbackResponse(mode, shortcuts) {
+  return {
+    dashboard: null,
+    dashboardId: null,
+    cardType: null,
+    confidence: 0.0,
+    shortcuts,
+    mode,
+    source: ADAPTIVE_SOURCES.FALLBACK,
+    visualPriority: VISUAL_PRIORITIES.NONE,
+    reason: null,
+  };
+}
+
+function insufficientDataResponse(mode, shortcuts) {
+  return {
+    dashboard: null,
+    dashboardId: null,
+    cardType: null,
+    confidence: 0.0,
+    shortcuts,
+    mode,
+    source: ADAPTIVE_SOURCES.INSUFFICIENT_DATA,
+    visualPriority: VISUAL_PRIORITIES.NONE,
+    reason: null,
+  };
+}
+
 function resolveEffectiveSessionId(requestSessionId, userConfig) {
   return normalizeNonEmptyString(requestSessionId) || normalizeNonEmptyString(userConfig?.sessionId);
 }
@@ -287,13 +382,16 @@ async function generateInstantRecommendation(navigations, hour, dayOfWeek) {
 
   if (normalizedNavigations.length === 0) {
     console.log('[CF] INSTANT: Nenhuma navegação na sessão');
-    return {
-      dashboard: null,
-      dashboardId: null,
-      cardType: null,
-      confidence: 0.0,
-      shortcuts: getDefaultShortcuts(),
-    };
+      return {
+        dashboard: null,
+        dashboardId: null,
+        cardType: null,
+        confidence: 0.0,
+        shortcuts: getDefaultShortcuts(),
+        source: ADAPTIVE_SOURCES.INSUFFICIENT_DATA,
+        visualPriority: VISUAL_PRIORITIES.NONE,
+        reason: null,
+      };
   }
 
   const navCount = normalizedNavigations.length;
@@ -379,13 +477,16 @@ Regras:
     return recommendation;
   } catch (error) {
     console.error('[CF] INSTANT: Erro no Gemini:', error.message);
-    return {
-      dashboard: null,
-      dashboardId: null,
-      cardType: null,
-      confidence: 0.0,
-      shortcuts: getDefaultShortcuts(),
-    };
+      return {
+        dashboard: null,
+        dashboardId: null,
+        cardType: null,
+        confidence: 0.0,
+        shortcuts: getDefaultShortcuts(),
+        source: ADAPTIVE_SOURCES.FALLBACK,
+        visualPriority: VISUAL_PRIORITIES.NONE,
+        reason: null,
+      };
   }
 }
 
@@ -700,7 +801,7 @@ async function setCache(userId, recommendation) {
 exports.getAdaptiveInterface = onCall(async (request) => {
   if (!PROJECT_ID || !ANALYTICS_DATASET || !GEMINI_API_KEY) {
     console.error("[CF] Variáveis de ambiente obrigatórias não configuradas");
-    return { dashboard: null, confidence: 0.0, shortcuts: [], mode: ADAPTIVE_MODES.GRADUAL };
+    return fallbackResponse(ADAPTIVE_MODES.GRADUAL, []);
   }
 
   const data = request.data;
@@ -709,7 +810,7 @@ exports.getAdaptiveInterface = onCall(async (request) => {
 
   if (!userId) {
     console.error("[CF] userId não fornecido");
-    return { dashboard: null, confidence: 0.0, shortcuts: [], mode: ADAPTIVE_MODES.GRADUAL };
+    return fallbackResponse(ADAPTIVE_MODES.GRADUAL, []);
   }
 
   const rawHour =
@@ -749,19 +850,15 @@ exports.getAdaptiveInterface = onCall(async (request) => {
         confidence: 0.0,
         shortcuts: getDefaultShortcuts(),
         mode: ADAPTIVE_MODES.STATIC,
+        source: ADAPTIVE_SOURCES.SYSTEM,
+        visualPriority: VISUAL_PRIORITIES.NONE,
+        reason: null,
       };
 
     case ADAPTIVE_MODES.INSTANT:
       if (!sessionId) {
         console.error(`[CF] INSTANT: sessionId obrigatório não fornecido`);
-        return {
-          dashboard: null,
-          dashboardId: null,
-          cardType: null,
-          confidence: 0.0,
-          shortcuts: getDefaultShortcuts(),
-          mode: ADAPTIVE_MODES.INSTANT,
-        };
+        return insufficientDataResponse(ADAPTIVE_MODES.INSTANT, getDefaultShortcuts());
       }
 
       try {
@@ -770,31 +867,17 @@ exports.getAdaptiveInterface = onCall(async (request) => {
 
         if (navigations.length === 0) {
           console.log(`[CF] INSTANT: Sessão sem navegações`);
-          return {
-            dashboard: null,
-            dashboardId: null,
-            cardType: null,
-            confidence: 0.0,
-            shortcuts: getDefaultShortcuts(),
-            mode: ADAPTIVE_MODES.INSTANT,
-          };
+          return insufficientDataResponse(ADAPTIVE_MODES.INSTANT, getDefaultShortcuts());
         }
 
         const recommendation = await generateInstantRecommendation(navigations, currentHour, dayOfWeek);
         return {
-          ...recommendation,
+          ...withAdaptiveMetadata(recommendation, ADAPTIVE_MODES.INSTANT),
           mode: ADAPTIVE_MODES.INSTANT,
         };
       } catch (error) {
         console.error(`[CF] INSTANT: Erro ao processar sessão:`, error.message);
-        return {
-          dashboard: null,
-          dashboardId: null,
-          cardType: null,
-          confidence: 0.0,
-          shortcuts: getDefaultShortcuts(),
-          mode: ADAPTIVE_MODES.INSTANT,
-        };
+        return fallbackResponse(ADAPTIVE_MODES.INSTANT, getDefaultShortcuts());
       }
 
     case ADAPTIVE_MODES.GRADUAL:
@@ -805,7 +888,7 @@ exports.getAdaptiveInterface = onCall(async (request) => {
         const normalized = normalizeRecommendation(cached);
         console.log(`[CF] Cache retornado: dashboard="${normalized.dashboard}", cardType="${normalized.cardType}"`);
         return {
-          ...normalized,
+          ...withAdaptiveMetadata(normalized, ADAPTIVE_MODES.GRADUAL),
           mode: ADAPTIVE_MODES.GRADUAL,
         };
       }
@@ -821,19 +904,12 @@ exports.getAdaptiveInterface = onCall(async (request) => {
         console.log(`[CF] Recomendação gerada e cacheada — userId="${userId}"`);
         console.log(`[CF] Resposta: dashboard="${recommendation.dashboard}", cardType="${recommendation.cardType}", confidence=${(recommendation.confidence * 100).toFixed(1)}%`);
         return {
-          ...recommendation,
+          ...withAdaptiveMetadata(recommendation, ADAPTIVE_MODES.GRADUAL),
           mode: ADAPTIVE_MODES.GRADUAL,
         };
       } catch (error) {
         console.error("[CF] Erro ao gerar recomendação:", error.message);
-        return {
-          dashboard: null,
-          dashboardId: null,
-          cardType: null,
-          confidence: 0.0,
-          shortcuts: [],
-          mode: ADAPTIVE_MODES.GRADUAL,
-        };
+        return fallbackResponse(ADAPTIVE_MODES.GRADUAL, []);
       }
   }
 }, 
