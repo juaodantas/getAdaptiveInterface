@@ -1,7 +1,22 @@
-const { onCall, onRequest } = require("firebase-functions/v2/https");
+const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https");
 const { BigQuery } = require("@google-cloud/bigquery");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const admin = require("firebase-admin");
+const {
+  ADAPTIVE_MODES,
+  VISUAL_PRIORITIES,
+  ADAPTIVE_SOURCES,
+  DASHBOARD_CONFIG,
+  DASHBOARD_MAP,
+  EXCLUDED_PAGES_ARRAY,
+  SCREEN_RESOURCE_REQUIREMENTS,
+  SAFE_LOTE_FALLBACK_ROUTE,
+  normalizeNonEmptyString,
+  hasValidCardType,
+} = require('./src/adaptiveContract');
+const { resolveRequestSessionId } = require('./src/sessionContext');
+const { buildEnhancedInstantRecommendation } = require('./src/enhancedInstantMode');
+const { getSupportedMetricEventsSqlList } = require('./src/adaptiveMetrics');
 
 admin.initializeApp();
 
@@ -21,57 +36,17 @@ const SCHEDULER_SECRET = process.env.SCHEDULER_SECRET;
 // ADAPTIVE MODES — configuração de modos de adaptação
 // ============================================
 
-const ADAPTIVE_MODES = {
-  STATIC: 'STATIC',
-  INSTANT: 'INSTANT',
-  GRADUAL: 'GRADUAL',
-};
-
-const VISUAL_PRIORITIES = {
-  NONE: 'none',
-  WEAK: 'weak',
-  MODERATE: 'moderate',
-  STRONG: 'strong',
-};
-
-const ADAPTIVE_SOURCES = {
-  ADAPTIVE: 'adaptive',
-  SYSTEM: 'system',
-  FALLBACK: 'fallback',
-  INSUFFICIENT_DATA: 'insufficient_data',
-};
-
 const EXCLUDED_PAGES_SQL = `
   '/modulosPage', '/splashPage', '/loginPage', '/homePage',
   '/cadastroPage', '/recuperarSenha', '/codigoSeguranca', '/novaSenha',
   '/multiAccountsPage', '/confirmsegurancaPage', '/permissaoNegadaPage'
 `;
 
-// Array JS para validação em runtime (usado nos filtros de resposta da Gemini)
-const EXCLUDED_PAGES_ARRAY = [
-  '/modulosPage', '/splashPage', '/loginPage', '/homePage',
-  '/cadastroPage', '/recuperarSenha', '/codigoSeguranca', '/novaSenha',
-  '/multiAccountsPage', '/confirmsegurancaPage', '/permissaoNegadaPage',
-];
-
 // ============================================
 // REQUISITOS DE RECURSO POR TELA
 // ============================================
 // Mapeia telas que exigem um resourceId/resourceType para funcionar corretamente.
 // Se uma tela está aqui e o shortcut não tem recurso, ela será descartada.
-const SCREEN_RESOURCE_REQUIREMENTS = {
-  '/lotePage':         { type: 'lote' },
-  '/setorPage':        { type: 'setor' },
-  '/solucaoPage':      { type: 'solucao' },
-  '/reservatoriosPage': { type: 'reservatorio' },
-  // Telas que funcionam sem recurso (não precisam estar aqui)
-  // '/historicoPage'     → opcional
-  // '/agendaPage'        → opcional
-  // '/gerenciarEquipePage' → opcional
-};
-
-const SAFE_LOTE_FALLBACK_ROUTE = '/areaCultivoPage';
-
 const USER_ID_SQL = `
   COALESCE(
     (SELECT value.string_value FROM UNNEST(user_properties) WHERE key = 'user_id'),
@@ -84,41 +59,6 @@ const USER_ID_SQL = `
 // CONFIGURAÇÃO DOS DASHBOARDS
 // ============================================
 // Definição centralizada com metadados técnicos para o frontend
-const DASHBOARD_CONFIG = {
-  LOTE_PRODUCAO: {
-    id: "LOTE_PRODUCAO",
-    displayName: "Lotes em Produção",
-    cardType: "lotes",
-    screens: ["/lotePage", "/setorPage"],
-  },
-  TAREFAS_PENDENTES: {
-    id: "TAREFAS_PENDENTES",
-    displayName: "Tarefas Pendentes",
-    cardType: "tarefas",
-    screens: ["/agendaPage", "/gerenciarEquipePage"],
-  },
-  PRODUCAO_TOTAL: {
-    id: "PRODUCAO_TOTAL",
-    displayName: "Produção Total",
-    cardType: "producao",
-    screens: ["/solucaoPage", "/reservatoriosPage", "/historicoPage"],
-  },
-  SAUDE_EQUIPES: {
-    id: "SAUDE_EQUIPES",
-    displayName: "Saúde das Equipes",
-    cardType: "saude",
-    screens: ["/gerenciarEquipePage", "/agendaPage"],
-  },
-};
-
-// Mapa legacy para compatibilidade com consultas existentes
-const DASHBOARD_MAP = Object.fromEntries(
-  Object.values(DASHBOARD_CONFIG).map((config) => [
-    config.displayName,
-    config.screens,
-  ]),
-);
-
 // ============================================
 // ADAPTIVE MODES — helper functions
 // ============================================
@@ -162,19 +102,6 @@ function getDefaultShortcuts() {
     { route: '/agendaPage', confidence: 0.5 },
     { route: '/reservatoriosPage', confidence: 0.5 },
   ];
-}
-
-function normalizeNonEmptyString(value) {
-  if (typeof value !== 'string') {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  return trimmed === '' ? null : trimmed;
-}
-
-function hasValidCardType(cardType) {
-  return Object.values(DASHBOARD_CONFIG).some((config) => config.cardType === cardType);
 }
 
 function visualPriorityForMode(mode, confidence, hasRecommendation) {
@@ -822,7 +749,7 @@ exports.getAdaptiveInterface = onCall(async (request) => {
   const dayOfWeek = new Date().getDay() + 1;
 
   const requestMode = data.mode || null;
-  const requestSessionId = data.sessionId || null;
+  const requestSessionId = resolveRequestSessionId(data);
   const requestHasSessionId = Boolean(normalizeNonEmptyString(requestSessionId));
   const shouldFetchUserConfig = !requestMode
     || (requestMode === ADAPTIVE_MODES.INSTANT && !requestHasSessionId);
@@ -831,7 +758,9 @@ exports.getAdaptiveInterface = onCall(async (request) => {
     : null;
 
   let mode = requestMode || userConfig?.mode || ADAPTIVE_MODES.GRADUAL;
-  const sessionId = resolveEffectiveSessionId(requestSessionId, userConfig);
+  const sessionId = mode === ADAPTIVE_MODES.INSTANT
+    ? normalizeNonEmptyString(requestSessionId)
+    : resolveEffectiveSessionId(requestSessionId, userConfig);
 
   if (!Object.values(ADAPTIVE_MODES).includes(mode)) {
     console.warn(`[CF] Modo inválido "${mode}", usando GRADUAL`);
@@ -858,26 +787,27 @@ exports.getAdaptiveInterface = onCall(async (request) => {
     case ADAPTIVE_MODES.INSTANT:
       if (!sessionId) {
         console.error(`[CF] INSTANT: sessionId obrigatório não fornecido`);
-        return insufficientDataResponse(ADAPTIVE_MODES.INSTANT, getDefaultShortcuts());
+        throw new HttpsError('invalid-argument', 'sessionId é obrigatório para o modo INSTANT');
       }
 
       try {
         console.log(`[CF] INSTANT: Buscando navegações da sessão "${sessionId}"`);
         const navigations = await getSessionNavigations(sessionId);
-
-        if (navigations.length === 0) {
-          console.log(`[CF] INSTANT: Sessão sem navegações`);
-          return insufficientDataResponse(ADAPTIVE_MODES.INSTANT, getDefaultShortcuts());
-        }
-
-        const recommendation = await generateInstantRecommendation(navigations, currentHour, dayOfWeek);
-        return {
-          ...withAdaptiveMetadata(recommendation, ADAPTIVE_MODES.INSTANT),
-          mode: ADAPTIVE_MODES.INSTANT,
-        };
+        return buildEnhancedInstantRecommendation({
+          data,
+          sessionNavigations: navigations,
+          geminiApiKey: GEMINI_API_KEY,
+        });
       } catch (error) {
         console.error(`[CF] INSTANT: Erro ao processar sessão:`, error.message);
-        return fallbackResponse(ADAPTIVE_MODES.INSTANT, getDefaultShortcuts());
+        return buildEnhancedInstantRecommendation({
+          data,
+          sessionNavigations: [],
+          geminiApiKey: GEMINI_API_KEY,
+          geminiGenerateText: async () => {
+            throw new Error('instant_orchestration_error');
+          },
+        });
       }
 
     case ADAPTIVE_MODES.GRADUAL:
@@ -1403,17 +1333,14 @@ async function aggregateMetricsFromBigQuery() {
       FROM ${eventsTable}
       WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
                               AND FORMAT_DATE('%Y%m%d', CURRENT_DATE())
-        AND event_name IN (
-          'session_start', 'shortcuts_shown', 'shortcut_clicked',
-          'dashboard_shown', 'dashboard_changed', 'first_productive_navigation'
-        )
+        AND event_name IN (${getSupportedMetricEventsSqlList()})
     )
     SELECT
       user_id,
       -- Modo mais frequente
       APPROX_TOP_COUNT(mode, 1)[OFFSET(0)].value AS mode,
       -- Sessões
-      COUNTIF(event_name = 'session_start') AS sessions_count,
+      COUNTIF(event_name IN ('session_start', 'adaptive_session_start')) AS sessions_count,
       -- Shortcuts
       COALESCE(SUM(CASE WHEN event_name = 'shortcuts_shown' THEN shortcuts_count ELSE 0 END), 0) AS shortcuts_shown,
       COUNTIF(event_name = 'shortcut_clicked') AS shortcuts_clicked,
