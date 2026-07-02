@@ -123,6 +123,8 @@ const DEFAULT_SUPPORTED_COMPONENTS = [
   'HomeInfoCard',
 ];
 
+const SHORTCUT_GROUPS = ['primary', 'secondary', 'contextual'];
+
 const SAFE_LIMITS = {
   maxShortcuts: 4,
   maxSectionAdaptations: 4,
@@ -167,6 +169,7 @@ module.exports = {
   DEFAULT_SUPPORTED_COMPONENTS,
   SAFE_LIMITS,
   SCREEN_RESOURCE_REQUIREMENTS,
+  SHORTCUT_GROUPS,
   SAFE_LOTE_FALLBACK_ROUTE,
   normalizeNonEmptyString,
   hasValidCardType,

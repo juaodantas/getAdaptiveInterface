@@ -155,9 +155,35 @@ function buildInfoRecommendationFallback({ signals = {}, clientCapabilities = {}
   };
 }
 
+function normalizeInfoWithSignal(raw, clientCapabilities, signals) {
+  const normalized = normalizeInfoRecommendation(raw, clientCapabilities);
+  if (!normalized) {
+    return buildInfoRecommendationFallback({ signals, clientCapabilities });
+  }
+
+  const ruleId = inferRuleId(signals);
+  if (!ruleId) {
+    return normalized;
+  }
+
+  const expected = INFO_BY_RULE[ruleId];
+  if (!expected) {
+    return normalized;
+  }
+
+  // Se o tipo retornado (por Gemini ou outro) difere do esperado pela regra,
+  // rejeita e usa fallback determinístico
+  if (normalized.type !== expected.type) {
+    return buildInfoRecommendationFallback({ signals, clientCapabilities });
+  }
+
+  return normalized;
+}
+
 module.exports = {
   buildInfoRecommendationFallback,
   isValidInfoRecommendation,
   normalizeInfoRecommendation,
+  normalizeInfoWithSignal,
   supportedInfoTypesFromCapabilities,
 };

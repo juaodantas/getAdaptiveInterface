@@ -1,8 +1,5 @@
-const { DASHBOARD_CONFIG } = require('./adaptiveContract');
-const {
-  buildInfoRecommendationFallback,
-  normalizeInfoRecommendation,
-} = require('./instantInfoRecommendationBuilder');
+const { DASHBOARD_CONFIG, SHORTCUT_GROUPS } = require('./adaptiveContract');
+const { normalizeInfoWithSignal } = require('./instantInfoRecommendationBuilder');
 
 function clampConfidence(value, fallback = 0.6) {
   const parsed = Number(value);
@@ -53,12 +50,17 @@ function normalizeInstantResponse(raw, clientCapabilities, signals) {
 
   const dashboardFields = normalizeDashboardFields(raw);
   const confidence = clampConfidence(raw.confidence);
-  const shortcuts = Array.isArray(raw.shortcuts) ? raw.shortcuts.slice(0, clientCapabilities.maxShortcuts).map((shortcut) => ({
-    route: typeof shortcut.route === 'string' ? shortcut.route : '',
-    confidence: clampConfidence(shortcut.confidence, confidence),
-    label: typeof shortcut.label === 'string' ? shortcut.label : 'Abrir',
-    reason: typeof shortcut.reason === 'string' ? shortcut.reason : '',
-  })) : [];
+  const shortcuts = Array.isArray(raw.shortcuts) ? raw.shortcuts.slice(0, clientCapabilities.maxShortcuts).map((shortcut) => {
+    const description = typeof shortcut.description === 'string' ? shortcut.description : '';
+    return {
+      route: typeof shortcut.route === 'string' ? shortcut.route : '',
+      confidence: clampConfidence(shortcut.confidence, confidence),
+      label: typeof shortcut.label === 'string' ? shortcut.label : 'Abrir',
+      description: description,
+      group: SHORTCUT_GROUPS.includes(shortcut.group) ? shortcut.group : 'contextual',
+      reason: typeof shortcut.reason === 'string' ? shortcut.reason : description,
+    };
+  }) : [];
 
   const sectionAdaptations = Array.isArray(raw.sectionAdaptations)
     ? raw.sectionAdaptations.slice(0, clientCapabilities.maxSectionAdaptations).map((section) => ({
@@ -78,8 +80,7 @@ function normalizeInstantResponse(raw, clientCapabilities, signals) {
   const legacyReasonDetails = raw.reason && typeof raw.reason === 'object' ? raw.reason : {};
   const reasonDetails = Object.keys(rawReasonDetails).length > 0 ? rawReasonDetails : legacyReasonDetails;
   const reason = typeof raw.reason === 'string' ? raw.reason : null;
-  const infoRecommendation = normalizeInfoRecommendation(raw.infoRecommendation, clientCapabilities)
-    || buildInfoRecommendationFallback({ signals: signals || { rulesApplied: raw.rulesApplied }, clientCapabilities });
+  const infoRecommendation = normalizeInfoWithSignal(raw.infoRecommendation, clientCapabilities, signals || { rulesApplied: raw.rulesApplied });
 
   return {
     responseVersion: '1.0',

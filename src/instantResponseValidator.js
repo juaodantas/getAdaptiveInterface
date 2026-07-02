@@ -8,6 +8,7 @@ const {
   INFO_RECOMMENDATION_PRIORITIES,
   INFO_RECOMMENDATION_SOURCES,
   INFO_RECOMMENDATION_TYPES,
+  SHORTCUT_GROUPS,
   VISUAL_PRIORITIES,
 } = require('./adaptiveContract');
 const { RULE_IDS } = require('./instantDomainRules');
@@ -114,6 +115,11 @@ function validateRawInstantResponse(response, clientCapabilities) {
     response.shortcuts.forEach((shortcut) => {
       if (shortcut?.route && !isAllowedRoute(shortcut.route)) errors.push('invalid_shortcut_route');
     });
+    response.shortcuts.forEach((shortcut) => {
+      if (shortcut?.group && !SHORTCUT_GROUPS.includes(shortcut.group)) {
+        errors.push('invalid_shortcut_group');
+      }
+    });
   }
   if (Array.isArray(response.sectionAdaptations)) {
     response.sectionAdaptations.forEach((section) => {
@@ -156,6 +162,7 @@ function validateInstantResponse(response, clientCapabilities) {
 
   response.shortcuts.forEach((shortcut) => {
     if (!isAllowedRoute(shortcut.route)) errors.push('invalid_shortcut_route');
+    if (shortcut.group && !SHORTCUT_GROUPS.includes(shortcut.group)) errors.push('invalid_shortcut_group');
   });
   response.sectionAdaptations.forEach((section) => {
     if (isUnsupportedComponent(section.component, clientCapabilities)) errors.push('unsupported_component');
@@ -209,8 +216,19 @@ function finalizeValidInstantResponse(response, clientCapabilities, signals) {
     ? response.infoRecommendation
     : buildInfoRecommendationFallback({ signals, clientCapabilities });
 
+  const normalizedShortcuts = (response.shortcuts || []).map((sc) => {
+    const description = sc.description || sc.reason || '';
+    return {
+      ...sc,
+      description,
+      group: SHORTCUT_GROUPS.includes(sc.group) ? sc.group : 'contextual',
+      reason: sc.reason || description,
+    };
+  });
+
   return {
     ...response,
+    shortcuts: normalizedShortcuts,
     mode: ADAPTIVE_MODES.INSTANT,
     source: ADAPTIVE_SOURCES.ADAPTIVE,
     visualPriority: VISUAL_PRIORITIES.MODERATE,

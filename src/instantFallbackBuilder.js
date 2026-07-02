@@ -88,14 +88,14 @@ function buildEnhancedInstantFallback({ operationalContext, clientCapabilities, 
         description: copy.description,
       },
     ],
-    shortcuts: [
-      {
-        route: signals.targetRoute,
-        confidence,
-        label: copy.actionLabel,
-        reason: copy.description,
-      },
-    ],
+    shortcuts: (signals.shortcuts || []).map((sc, index) => ({
+      route: sc.route,
+      confidence: sc.confidence || (confidence * (index === 0 ? 1.0 : index === 1 ? 0.85 : 0.75)),
+      label: sc.label || copy.actionLabel,
+      description: sc.description || copy.description,
+      group: sc.group || (index === 0 ? 'primary' : index === 1 ? 'secondary' : 'contextual'),
+      reason: sc.description || copy.description,
+    })),
     focus: {
       component: 'AdaptiveFocusBanner',
       message: `Próximo foco: ${copy.title}.`,
