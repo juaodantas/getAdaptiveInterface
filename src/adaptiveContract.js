@@ -64,6 +64,38 @@ const ALLOWED_INSTANT_ROUTES = [
   '/protocoloPage',
 ];
 
+const INFO_RECOMMENDATION_TYPES = [
+  'today_cultivation',
+  'reservoir_report',
+  'day_progress',
+  'field_notes_summary',
+  'basic_tip',
+];
+
+const INFO_RECOMMENDATION_SOURCES = ['isis', 'local_tip', 'fallback'];
+const INFO_RECOMMENDATION_PRIORITIES = ['low', 'medium', 'high'];
+const INFO_RECOMMENDATION_CATEGORIES = [
+  'geral',
+  'agenda',
+  'lote',
+  'protocolo',
+  'solucao',
+  'reservatorio',
+  'caderno_campo',
+  'cultivo',
+];
+
+const ALLOWED_INFO_CTA_ROUTES = [
+  '/agendaPage',
+  '/lotePage',
+  '/protocoloPage',
+  '/solucaoPage',
+  '/reservatoriosPage',
+  '/cadernoCampoPage',
+  '/relatoriosPage',
+  '/areaCultivoPage',
+];
+
 const EXCLUDED_PAGES_ARRAY = [
   '/modulosPage', '/splashPage', '/loginPage', '/homePage',
   '/cadastroPage', '/recuperarSenha', '/codigoSeguranca', '/novaSenha',
@@ -88,6 +120,7 @@ const DEFAULT_SUPPORTED_COMPONENTS = [
   'AdaptiveHighlightFrame',
   'EmptySectionWithAction',
   'AdaptiveRecommendedActionTile',
+  'HomeInfoCard',
 ];
 
 const SAFE_LIMITS = {
@@ -124,6 +157,11 @@ module.exports = {
   DASHBOARD_CONFIG,
   DASHBOARD_MAP,
   ALLOWED_INSTANT_ROUTES,
+  INFO_RECOMMENDATION_TYPES,
+  INFO_RECOMMENDATION_SOURCES,
+  INFO_RECOMMENDATION_PRIORITIES,
+  INFO_RECOMMENDATION_CATEGORIES,
+  ALLOWED_INFO_CTA_ROUTES,
   EXCLUDED_PAGES_ARRAY,
   FORBIDDEN_COMPONENTS,
   DEFAULT_SUPPORTED_COMPONENTS,

@@ -1,11 +1,22 @@
 const {
   ADAPTIVE_MODES,
   ADAPTIVE_SOURCES,
+  ALLOWED_INFO_CTA_ROUTES,
   ALLOWED_INSTANT_ROUTES,
   FORBIDDEN_COMPONENTS,
+  INFO_RECOMMENDATION_CATEGORIES,
+  INFO_RECOMMENDATION_PRIORITIES,
+  INFO_RECOMMENDATION_SOURCES,
+  INFO_RECOMMENDATION_TYPES,
   VISUAL_PRIORITIES,
 } = require('./adaptiveContract');
 const { RULE_IDS } = require('./instantDomainRules');
+const {
+  buildInfoRecommendationFallback,
+  supportedInfoTypesFromCapabilities,
+} = require('./instantInfoRecommendationBuilder');
+
+const UNSAFE_INFO_TEXT_PATTERN = /(?:\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b|@|https?:\/\/|resourceName|cpf|cnpj)/i;
 
 function isAllowedRoute(route) {
   return ALLOWED_INSTANT_ROUTES.includes(route);
@@ -52,8 +63,16 @@ function containsForbiddenUiEquivalent(value) {
     && FORBIDDEN_UI_EQUIVALENT_TOKENS.some((token) => normalizeToken(value).includes(normalizeToken(token)));
 }
 
-function hasForbiddenUiEquivalentOutsideExplicitFields(value) {
-  if (containsForbiddenUiEquivalent(value)) {
+function isAllowedDomainEnumValue(path, value) {
+  const fieldName = path[path.length - 1];
+  const parentName = path[path.length - 2];
+  return parentName === 'infoRecommendation'
+    && fieldName === 'type'
+    && INFO_RECOMMENDATION_TYPES.includes(value);
+}
+
+function hasForbiddenUiEquivalentOutsideExplicitFields(value, path = []) {
+  if (containsForbiddenUiEquivalent(value) && !isAllowedDomainEnumValue(path, value)) {
     return true;
   }
   if (!value || typeof value !== 'object') {
@@ -65,7 +84,7 @@ function hasForbiddenUiEquivalentOutsideExplicitFields(value) {
       return false;
     }
     return containsForbiddenUiEquivalent(key)
-      || hasForbiddenUiEquivalentOutsideExplicitFields(entry);
+      || hasForbiddenUiEquivalentOutsideExplicitFields(entry, [...path, key]);
   });
 }
 
@@ -151,11 +170,45 @@ function validateInstantResponse(response, clientCapabilities) {
   if (response.uiTreatment?.showProgressBar !== false) {
     errors.push('progress_bar_requested');
   }
+  validateInfoRecommendation(response.infoRecommendation, clientCapabilities).forEach((error) => errors.push(error));
 
   return { valid: errors.length === 0, errors };
 }
 
-function finalizeValidInstantResponse(response) {
+function validateInfoRecommendation(infoRecommendation, clientCapabilities) {
+  const errors = [];
+  const supportedInfoTypes = supportedInfoTypesFromCapabilities(clientCapabilities);
+
+  if (!infoRecommendation || typeof infoRecommendation !== 'object' || Array.isArray(infoRecommendation)) {
+    return ['missing_info_recommendation'];
+  }
+  if (!INFO_RECOMMENDATION_TYPES.includes(infoRecommendation.type)) errors.push('invalid_info_type');
+  if (!supportedInfoTypes.includes(infoRecommendation.type)) errors.push('unsupported_info_type');
+  if (!INFO_RECOMMENDATION_SOURCES.includes(infoRecommendation.source)) errors.push('invalid_info_source');
+  if (!INFO_RECOMMENDATION_PRIORITIES.includes(infoRecommendation.priority)) errors.push('invalid_info_priority');
+  if (!INFO_RECOMMENDATION_CATEGORIES.includes(infoRecommendation.category)) errors.push('invalid_info_category');
+  if (!ALLOWED_INFO_CTA_ROUTES.includes(infoRecommendation.ctaRoute)) errors.push('invalid_info_cta_route');
+  if (typeof infoRecommendation.title !== 'string'
+    || infoRecommendation.title.trim().length === 0
+    || infoRecommendation.title.trim().length > 80
+    || UNSAFE_INFO_TEXT_PATTERN.test(infoRecommendation.title)) {
+    errors.push('invalid_info_title');
+  }
+  if (typeof infoRecommendation.reason !== 'string'
+    || infoRecommendation.reason.trim().length === 0
+    || infoRecommendation.reason.trim().length > 160
+    || UNSAFE_INFO_TEXT_PATTERN.test(infoRecommendation.reason)) {
+    errors.push('invalid_info_reason');
+  }
+
+  return errors;
+}
+
+function finalizeValidInstantResponse(response, clientCapabilities, signals) {
+  const infoRecommendation = validateInfoRecommendation(response.infoRecommendation, clientCapabilities || {}).length === 0
+    ? response.infoRecommendation
+    : buildInfoRecommendationFallback({ signals, clientCapabilities });
+
   return {
     ...response,
     mode: ADAPTIVE_MODES.INSTANT,
@@ -166,11 +219,13 @@ function finalizeValidInstantResponse(response) {
       used: false,
       reason: null,
     },
+    infoRecommendation,
   };
 }
 
 module.exports = {
   validateRawInstantResponse,
   validateInstantResponse,
+  validateInfoRecommendation,
   finalizeValidInstantResponse,
 };

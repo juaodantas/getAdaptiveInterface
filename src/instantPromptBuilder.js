@@ -1,7 +1,12 @@
 const {
   ALLOWED_INSTANT_ROUTES,
+  ALLOWED_INFO_CTA_ROUTES,
   DASHBOARD_CONFIG,
   FORBIDDEN_COMPONENTS,
+  INFO_RECOMMENDATION_CATEGORIES,
+  INFO_RECOMMENDATION_PRIORITIES,
+  INFO_RECOMMENDATION_SOURCES,
+  INFO_RECOMMENDATION_TYPES,
 } = require('./adaptiveContract');
 const { DOMAIN_RULES } = require('./instantDomainRules');
 
@@ -22,9 +27,19 @@ function buildInstantPrompt({ navigationContext, sessionNavigations, operational
       maxSectionAdaptations: clientCapabilities.maxSectionAdaptations,
       supportsInfoIconExplanation: clientCapabilities.supportsInfoIconExplanation,
       supportsHighlightFrame: clientCapabilities.supportsHighlightFrame,
+      supportedInfoTypes: clientCapabilities.supportedInfoTypes,
     },
     deterministicSignals: signals,
     allowedRoutes: ALLOWED_INSTANT_ROUTES,
+    infoRecommendationContract: {
+      required: true,
+      types: INFO_RECOMMENDATION_TYPES,
+      supportedInfoTypes: clientCapabilities.supportedInfoTypes,
+      sources: INFO_RECOMMENDATION_SOURCES,
+      priorities: INFO_RECOMMENDATION_PRIORITIES,
+      categories: INFO_RECOMMENDATION_CATEGORIES,
+      allowedCtaRoutes: ALLOWED_INFO_CTA_ROUTES,
+    },
     dashboards,
     forbiddenComponents: FORBIDDEN_COMPONENTS,
     domainRules: DOMAIN_RULES,
@@ -36,6 +51,7 @@ Não invente entidades, nomes de lotes, usuários, tarefas ou textos livres iden
 Não retorne progress bar, stepper, checklist nem componente equivalente.
 Rotas permitidas são somente as listadas em allowedRoutes.
 Componentes permitidos são somente os suportados pelo cliente e não proibidos.
+infoRecommendation é obrigatório, deve usar somente enums/rotas allowlisted do contrato e não pode usar dados identificáveis.
 Retorne APENAS JSON válido, sem markdown, seguindo o schema obrigatório:
 {
   "responseVersion":"1.0",
@@ -50,7 +66,8 @@ Retorne APENAS JSON válido, sem markdown, seguindo o schema obrigatório:
   "uiTreatment":{"density":"comfortable","emphasis":"moderate","animation":"subtle","explanationVisibility":"low","showProgressBar":false},
   "reason":"texto curto ou null",
   "reasonDetails":{"summary":"texto curto","details":["sinais técnicos"],"display":"info_icon"},
-  "rulesApplied":["RULE-010"]
+  "rulesApplied":["RULE-010"],
+  "infoRecommendation":{"type":"today_cultivation|reservoir_report|day_progress|field_notes_summary|basic_tip","source":"isis|local_tip|fallback","priority":"low|medium|high","title":"texto curto genérico","reason":"texto curto genérico","ctaRoute":"/rota allowlisted","category":"geral|agenda|lote|protocolo|solucao|reservatorio|caderno_campo|cultivo"}
 }
 
 JSON de contexto sanitizado:

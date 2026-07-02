@@ -5,6 +5,7 @@ const {
   VISUAL_PRIORITIES,
 } = require('./adaptiveContract');
 const { deriveInstantSignals } = require('./instantDomainRules');
+const { buildInfoRecommendationFallback } = require('./instantInfoRecommendationBuilder');
 
 const STEP_COPY = {
   create_lot_with_protocol: {
@@ -54,7 +55,7 @@ const STEP_COPY = {
   },
 };
 
-function buildEnhancedInstantFallback({ operationalContext, reason = 'deterministic_fallback' }) {
+function buildEnhancedInstantFallback({ operationalContext, clientCapabilities, reason = 'deterministic_fallback' }) {
   const signals = deriveInstantSignals(operationalContext);
   const dashboard = DASHBOARD_CONFIG[signals.dashboardId] || DASHBOARD_CONFIG.TAREFAS_PENDENTES;
   const copy = STEP_COPY[signals.stepId] || STEP_COPY.review_agenda_context;
@@ -115,6 +116,7 @@ function buildEnhancedInstantFallback({ operationalContext, reason = 'determinis
       display: 'info_icon',
     },
     rulesApplied: signals.rulesApplied,
+    infoRecommendation: buildInfoRecommendationFallback({ signals, clientCapabilities }),
     fallback: {
       used: true,
       reason,

@@ -15,6 +15,8 @@ const ENHANCED_INSTANT_METRIC_EVENTS = [
   'section_highlight_shown',
   'section_highlight_clicked',
   'info_icon_opened',
+  'info_card_shown',
+  'info_card_clicked',
   'contextual_onboarding_shown',
   'contextual_onboarding_clicked',
 ];

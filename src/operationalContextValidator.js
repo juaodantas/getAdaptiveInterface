@@ -24,6 +24,9 @@ const DUE_LABELS = {
 const RECORD_TYPES = ['nutrition_adjustment', 'nutritional_adjustment', 'harvest', 'inspection', 'irrigation', 'field_note'];
 const SEVERITIES = ['low', 'medium', 'high', 'critical'];
 const ALERT_TYPES = ['critical', 'operational', 'agenda', 'production', 'protocol', 'nutrition'];
+const RESERVOIR_LEVELS = ['unknown', 'low', 'normal', 'high', 'critical'];
+const INFO_CONTEXT_TYPES = ['today_cultivation', 'reservoir_report', 'day_progress', 'field_notes_summary', 'basic_tip'];
+const INFO_CONTEXT_CATEGORIES = ['geral', 'agenda', 'lote', 'protocolo', 'solucao', 'reservatorio', 'caderno_campo', 'cultivo'];
 const ISO_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 
 function normalizeIsoTimestamp(value) {
@@ -58,6 +61,8 @@ function normalizeOperationalContext(raw) {
   const dashboardState = objectOrEmpty(context.dashboardState);
   const agendaState = objectOrEmpty(context.agendaState);
   const fieldNotebookState = objectOrEmpty(context.fieldNotebookState);
+  const reservoirState = objectOrEmpty(context.reservoirState);
+  const infoContextState = objectOrEmpty(context.infoContextState);
   const productionState = objectOrEmpty(context.productionState);
   const alertState = objectOrEmpty(context.alertState);
   const testSequenceSignals = objectOrEmpty(context.testSequenceSignals);
@@ -85,7 +90,22 @@ function normalizeOperationalContext(raw) {
     },
     fieldNotebookState: {
       hasRecentNutritionAdjustmentRecord: toBoolean(fieldNotebookState.hasRecentNutritionAdjustmentRecord),
+      hasRecentFieldNotes: toBoolean(fieldNotebookState.hasRecentFieldNotes),
+      uncheckedNotesCount: toSafeCount(fieldNotebookState.uncheckedNotesCount),
       latestRecordType: normalizeAllowedString(fieldNotebookState.latestRecordType, RECORD_TYPES),
+    },
+    reservoirState: {
+      hasReservoirs: toBoolean(reservoirState.hasReservoirs),
+      totalCount: toSafeCount(reservoirState.totalCount),
+      lowLevelCount: toSafeCount(reservoirState.lowLevelCount),
+      criticalLevelCount: toSafeCount(reservoirState.criticalLevelCount),
+      currentLevel: normalizeAllowedString(reservoirState.currentLevel, RESERVOIR_LEVELS),
+    },
+    infoContextState: {
+      lastShownType: normalizeAllowedString(infoContextState.lastShownType, INFO_CONTEXT_TYPES),
+      lastShownCategory: normalizeAllowedString(infoContextState.lastShownCategory, INFO_CONTEXT_CATEGORIES),
+      dismissedTodayCount: toSafeCount(infoContextState.dismissedTodayCount),
+      hasSeenInfoToday: toBoolean(infoContextState.hasSeenInfoToday),
     },
     productionState: {
       hasProductionData: toBoolean(productionState.hasProductionData),

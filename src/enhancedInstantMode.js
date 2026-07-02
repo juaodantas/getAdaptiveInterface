@@ -19,7 +19,7 @@ async function buildEnhancedInstantRecommendation({
   const navigationContext = normalizeNavigationContext(data, sessionNavigations);
   const sanitizedSessionNavigations = sanitizeSessionNavigations(sessionNavigations);
   const signals = deriveInstantSignals(operationalContext);
-  const fallbackInput = { operationalContext };
+  const fallbackInput = { operationalContext, clientCapabilities };
 
   const prompt = buildInstantPrompt({
     navigationContext,
@@ -41,7 +41,7 @@ async function buildEnhancedInstantRecommendation({
       });
     }
 
-    const normalized = normalizeInstantResponse(parsed, clientCapabilities);
+    const normalized = normalizeInstantResponse(parsed, clientCapabilities, signals);
     const validation = validateInstantResponse(normalized, clientCapabilities);
 
     if (!validation.valid) {
@@ -51,7 +51,7 @@ async function buildEnhancedInstantRecommendation({
       });
     }
 
-    return finalizeValidInstantResponse(normalized);
+    return finalizeValidInstantResponse(normalized, clientCapabilities, signals);
   } catch (error) {
     return buildEnhancedInstantFallback({
       ...fallbackInput,

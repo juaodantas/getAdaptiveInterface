@@ -1,6 +1,7 @@
 const {
   DEFAULT_SUPPORTED_COMPONENTS,
   FORBIDDEN_COMPONENTS,
+  INFO_RECOMMENDATION_TYPES,
   SAFE_LIMITS,
 } = require('./adaptiveContract');
 
@@ -23,6 +24,8 @@ function normalizeClientCapabilities(raw) {
       ? input.supportedComponents
       : DEFAULT_SUPPORTED_COMPONENTS,
   ).filter((component) => !forbiddenComponents.includes(component));
+  const requestedInfoTypes = uniqueStrings(Array.isArray(input.supportedInfoTypes) ? input.supportedInfoTypes : []);
+  const supportedInfoTypes = requestedInfoTypes.filter((type) => INFO_RECOMMENDATION_TYPES.includes(type));
 
   return {
     supportedComponents,
@@ -30,6 +33,7 @@ function normalizeClientCapabilities(raw) {
     supportsHighlightFrame: input.supportsHighlightFrame === true,
     maxShortcuts: clampLimit(input.maxShortcuts, SAFE_LIMITS.maxShortcuts),
     maxSectionAdaptations: clampLimit(input.maxSectionAdaptations, SAFE_LIMITS.maxSectionAdaptations),
+    supportedInfoTypes: supportedInfoTypes.length > 0 ? supportedInfoTypes : INFO_RECOMMENDATION_TYPES,
     forbiddenComponents,
   };
 }

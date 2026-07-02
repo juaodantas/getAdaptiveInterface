@@ -1,4 +1,8 @@
 const { DASHBOARD_CONFIG } = require('./adaptiveContract');
+const {
+  buildInfoRecommendationFallback,
+  normalizeInfoRecommendation,
+} = require('./instantInfoRecommendationBuilder');
 
 function clampConfidence(value, fallback = 0.6) {
   const parsed = Number(value);
@@ -42,7 +46,7 @@ function normalizeDashboardFields(raw) {
   return { dashboard: config.displayName, dashboardId: config.id, cardType: config.cardType };
 }
 
-function normalizeInstantResponse(raw, clientCapabilities) {
+function normalizeInstantResponse(raw, clientCapabilities, signals) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     return null;
   }
@@ -74,6 +78,8 @@ function normalizeInstantResponse(raw, clientCapabilities) {
   const legacyReasonDetails = raw.reason && typeof raw.reason === 'object' ? raw.reason : {};
   const reasonDetails = Object.keys(rawReasonDetails).length > 0 ? rawReasonDetails : legacyReasonDetails;
   const reason = typeof raw.reason === 'string' ? raw.reason : null;
+  const infoRecommendation = normalizeInfoRecommendation(raw.infoRecommendation, clientCapabilities)
+    || buildInfoRecommendationFallback({ signals: signals || { rulesApplied: raw.rulesApplied }, clientCapabilities });
 
   return {
     responseVersion: '1.0',
@@ -109,6 +115,7 @@ function normalizeInstantResponse(raw, clientCapabilities) {
       display: typeof reasonDetails.display === 'string' ? reasonDetails.display : 'info_icon',
     },
     rulesApplied: Array.isArray(raw.rulesApplied) ? raw.rulesApplied.filter((rule) => typeof rule === 'string') : [],
+    infoRecommendation,
   };
 }
 
