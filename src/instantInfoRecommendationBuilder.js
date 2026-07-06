@@ -228,10 +228,68 @@ function normalizeInfoWithSignal(raw, clientCapabilities, signals, operationalCo
   return normalized;
 }
 
+const ALTERNATIVE_CTA_BY_TARGET = {
+  '/protocoloPage': '/lotePage',
+  '/agendaPage': '/relatoriosPage',
+  '/cadernoCampoPage': '/solucaoPage',
+  '/relatoriosPage': '/agendaPage',
+  '/lotePage': '/areaCultivoPage',
+  '/solucaoPage': '/reservatoriosPage',
+  '/gerenciarEquipePage': '/agendaPage',
+  '/areaCultivoPage': '/lotePage',
+  '/reservatoriosPage': '/solucaoPage',
+};
+
+function buildDeduplicatedCtaRoute(primaryRoute, allowedRoutes) {
+  if (typeof primaryRoute !== 'string' || primaryRoute === '') return primaryRoute;
+  const alternative = ALTERNATIVE_CTA_BY_TARGET[primaryRoute];
+  if (alternative && Array.isArray(allowedRoutes) && allowedRoutes.includes(alternative)) {
+    return alternative;
+  }
+  return primaryRoute;
+}
+
+function deduplicateShortcutRoutes(shortcuts, primaryRoute) {
+  if (!Array.isArray(shortcuts) || shortcuts.length === 0) return shortcuts;
+
+  const seenRoutes = new Set();
+  const deduplicated = [];
+  for (const sc of shortcuts) {
+    if (sc && typeof sc.route === 'string' && !seenRoutes.has(sc.route)) {
+      seenRoutes.add(sc.route);
+      deduplicated.push({ ...sc });
+    }
+  }
+
+  const primaryIndex = deduplicated.findIndex((sc) => sc.group === 'primary');
+  if (primaryIndex >= 0 && deduplicated[primaryIndex].route === primaryRoute) {
+    const swapCandidate = deduplicated.find(
+      (sc, i) => i !== primaryIndex && sc.route !== primaryRoute,
+    );
+    if (swapCandidate) {
+      deduplicated[primaryIndex] = { ...deduplicated[primaryIndex], route: swapCandidate.route };
+    }
+  }
+
+  const finalRoutes = new Set();
+  const result = [];
+  for (const sc of deduplicated) {
+    if (!finalRoutes.has(sc.route)) {
+      finalRoutes.add(sc.route);
+      result.push(sc);
+    }
+  }
+
+  return result;
+}
+
 module.exports = {
   buildInfoRecommendationFallback,
   isValidInfoRecommendation,
   normalizeInfoRecommendation,
   normalizeInfoWithSignal,
   supportedInfoTypesFromCapabilities,
+  ALTERNATIVE_CTA_BY_TARGET,
+  buildDeduplicatedCtaRoute,
+  deduplicateShortcutRoutes,
 };

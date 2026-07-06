@@ -3,9 +3,10 @@ const {
   ADAPTIVE_SOURCES,
   DASHBOARD_CONFIG,
   VISUAL_PRIORITIES,
+  ALLOWED_INFO_CTA_ROUTES,
 } = require('./adaptiveContract');
 const { deriveInstantSignals } = require('./instantDomainRules');
-const { buildInfoRecommendationFallback } = require('./instantInfoRecommendationBuilder');
+const { buildInfoRecommendationFallback, buildDeduplicatedCtaRoute, deduplicateShortcutRoutes } = require('./instantInfoRecommendationBuilder');
 
 const STEP_COPY = {
   create_lot_with_protocol: {
@@ -56,6 +57,21 @@ function buildEnhancedInstantFallback({ operationalContext, clientCapabilities, 
   const copy = STEP_COPY[signals.stepId] || STEP_COPY.create_lot_with_protocol;
   const confidence = reason === 'gemini_invalid_response' ? 0.68 : 0.64;
 
+  const infoRec = buildInfoRecommendationFallback({ signals, clientCapabilities, operationalContext });
+  if (infoRec && signals.targetRoute) {
+    infoRec.ctaRoute = buildDeduplicatedCtaRoute(signals.targetRoute, ALLOWED_INFO_CTA_ROUTES);
+  }
+
+  const rawShortcuts = (signals.shortcuts || []).map((sc, index) => ({
+    route: sc.route,
+    confidence: sc.confidence || (confidence * (index === 0 ? 1.0 : index === 1 ? 0.85 : 0.75)),
+    label: sc.label || copy.actionLabel,
+    description: sc.description || copy.description,
+    group: sc.group || (index === 0 ? 'primary' : index === 1 ? 'secondary' : 'contextual'),
+    reason: sc.description || copy.description,
+  }));
+  const shortcuts = deduplicateShortcutRoutes(rawShortcuts, signals.targetRoute || '');
+
   return {
     responseVersion: '1.0',
     mode: ADAPTIVE_MODES.INSTANT,
@@ -83,14 +99,7 @@ function buildEnhancedInstantFallback({ operationalContext, clientCapabilities, 
         description: copy.description,
       },
     ],
-    shortcuts: (signals.shortcuts || []).map((sc, index) => ({
-      route: sc.route,
-      confidence: sc.confidence || (confidence * (index === 0 ? 1.0 : index === 1 ? 0.85 : 0.75)),
-      label: sc.label || copy.actionLabel,
-      description: sc.description || copy.description,
-      group: sc.group || (index === 0 ? 'primary' : index === 1 ? 'secondary' : 'contextual'),
-      reason: sc.description || copy.description,
-    })),
+    shortcuts,
     focus: {
       component: 'AdaptiveFocusBanner',
       message: `Próximo foco: ${copy.title}.`,
@@ -111,7 +120,7 @@ function buildEnhancedInstantFallback({ operationalContext, clientCapabilities, 
       display: 'info_icon',
     },
     rulesApplied: signals.rulesApplied,
-    infoRecommendation: buildInfoRecommendationFallback({ signals, clientCapabilities, operationalContext }),
+    infoRecommendation: infoRec,
     fallback: {
       used: true,
       reason,

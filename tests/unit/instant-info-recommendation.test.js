@@ -7,6 +7,9 @@ const { normalizeInstantResponse } = require('../../src/instantResponseNormalize
 const { validateInstantResponse, validateRawInstantResponse } = require('../../src/instantResponseValidator');
 const { buildEnhancedInstantRecommendation } = require('../../src/enhancedInstantMode');
 const { ENHANCED_INSTANT_METRIC_EVENTS, getSupportedMetricEventsSqlList } = require('../../src/adaptiveMetrics');
+const { buildDeduplicatedCtaRoute, deduplicateShortcutRoutes, ALTERNATIVE_CTA_BY_TARGET } = require('../../src/instantInfoRecommendationBuilder');
+const { finalizeValidInstantResponse } = require('../../src/instantResponseValidator');
+const { ALLOWED_INFO_CTA_ROUTES } = require('../../src/adaptiveContract');
 
 function capabilities(overrides = {}) {
   return normalizeClientCapabilities({
@@ -208,5 +211,178 @@ describe('INSTANT infoRecommendation', () => {
     expect(ENHANCED_INSTANT_METRIC_EVENTS).toContain('info_card_clicked');
     expect(getSupportedMetricEventsSqlList()).toContain("'info_card_shown'");
     expect(getSupportedMetricEventsSqlList()).toContain("'info_card_clicked'");
+  });
+});
+
+describe('route deduplication helpers', () => {
+  // ---------------------------------------------------------------------------
+  // ALTERNATIVE_CTA_BY_TARGET
+  // ---------------------------------------------------------------------------
+
+  test('ALTERNATIVE_CTA_BY_TARGET covers all targetRoutes from domain rules', () => {
+    const distinctTargetRoutes = [
+      '/protocoloPage',
+      '/agendaPage',
+      '/cadernoCampoPage',
+      '/relatoriosPage',
+    ];
+    for (const route of distinctTargetRoutes) {
+      expect(ALTERNATIVE_CTA_BY_TARGET).toHaveProperty(route);
+    }
+  });
+
+  test('all alternative routes are in ALLOWED_INFO_CTA_ROUTES', () => {
+    const values = Object.values(ALTERNATIVE_CTA_BY_TARGET);
+    for (const value of values) {
+      expect(ALLOWED_INFO_CTA_ROUTES).toContain(value);
+    }
+  });
+
+  test('ALTERNATIVE_CTA_BY_TARGET has bijective pairs for core routes', () => {
+    // Core route pairs are bidirectional (A↔B):
+    //   /agendaPage ↔ /relatoriosPage
+    //   /lotePage ↔ /areaCultivoPage
+    //   /solucaoPage ↔ /reservatoriosPage
+    const bijectivePairs = [
+      ['/agendaPage', '/relatoriosPage'],
+      ['/lotePage', '/areaCultivoPage'],
+      ['/solucaoPage', '/reservatoriosPage'],
+    ];
+    for (const [a, b] of bijectivePairs) {
+      expect(ALTERNATIVE_CTA_BY_TARGET[a]).toBe(b);
+      expect(ALTERNATIVE_CTA_BY_TARGET[b]).toBe(a);
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // buildDeduplicatedCtaRoute
+  // ---------------------------------------------------------------------------
+
+  test('returns alternative route when primary is mapped — /protocoloPage → /lotePage', () => {
+    expect(buildDeduplicatedCtaRoute('/protocoloPage', ALLOWED_INFO_CTA_ROUTES)).toBe('/lotePage');
+  });
+
+  test('returns alternative route for agenda — /agendaPage → /relatoriosPage', () => {
+    expect(buildDeduplicatedCtaRoute('/agendaPage', ALLOWED_INFO_CTA_ROUTES)).toBe('/relatoriosPage');
+  });
+
+  test('returns primary when route is not in map', () => {
+    expect(buildDeduplicatedCtaRoute('/unknownPage', ALLOWED_INFO_CTA_ROUTES)).toBe('/unknownPage');
+  });
+
+  test('returns primary when alternative is not in allowedRoutes', () => {
+    // /agendaPage maps to /relatoriosPage, but /relatoriosPage is NOT in the
+    // restricted allowlist below, so the function falls back to the primary.
+    expect(buildDeduplicatedCtaRoute('/agendaPage', ['/lotePage'])).toBe('/agendaPage');
+  });
+
+  test('returns primary when primaryRoute is empty string', () => {
+    expect(buildDeduplicatedCtaRoute('', ALLOWED_INFO_CTA_ROUTES)).toBe('');
+  });
+
+  test('returns primary when primaryRoute is not a string', () => {
+    expect(buildDeduplicatedCtaRoute(null, ALLOWED_INFO_CTA_ROUTES)).toBeNull();
+  });
+
+  // ---------------------------------------------------------------------------
+  // deduplicateShortcutRoutes
+  // ---------------------------------------------------------------------------
+
+  test('removes duplicate routes keeping first occurrence', () => {
+    const result = deduplicateShortcutRoutes([
+      { route: '/a' },
+      { route: '/a' },
+      { route: '/b' },
+    ]);
+    expect(result).toHaveLength(2);
+    expect(result[0].route).toBe('/a');
+    expect(result[1].route).toBe('/b');
+  });
+
+  test('removes duplicate after swapping primary route', () => {
+    const result = deduplicateShortcutRoutes(
+      [
+        { route: '/agendaPage', group: 'primary' },
+        { route: '/relatoriosPage', group: 'secondary' },
+      ],
+      '/agendaPage',
+    );
+    // The primary shortcut's route collides with primaryRoute so it is swapped
+    // to the alternative; the swap may create a temporary duplicate that gets
+    // deduped away in the final pass, so the result must not contain duplicates.
+    const primary = result.find((s) => s.group === 'primary');
+    expect(primary).toBeDefined();
+    expect(primary.route).not.toBe('/agendaPage');
+    const routes = result.map((s) => s.route);
+    expect(new Set(routes).size).toBe(routes.length);
+  });
+
+  test('preserves all original fields except route when swapping primary', () => {
+    const result = deduplicateShortcutRoutes(
+      [
+        { route: '/agendaPage', group: 'primary', label: 'Agenda', description: 'Ver agenda', customField: 'keep' },
+        { route: '/relatoriosPage', group: 'secondary', label: 'Relatórios' },
+      ],
+      '/agendaPage',
+    );
+    const primary = result.find((s) => s.group === 'primary');
+    expect(primary).toBeDefined();
+    expect(primary.route).toBe('/relatoriosPage');
+    expect(primary.label).toBe('Agenda');
+    expect(primary.description).toBe('Ver agenda');
+    expect(primary.customField).toBe('keep');
+  });
+
+  test('uses group property to find primary (not index 0)', () => {
+    // Primary is at index 1 because group === 'primary', not at index 0
+    const result = deduplicateShortcutRoutes(
+      [
+        { route: '/a', group: 'secondary' },
+        { route: '/b', group: 'primary' },
+      ],
+      '/b',
+    );
+    // The primary's route '/b' collided with primaryRoute, so it was swapped
+    // to '/a', creating a duplicate that was deduped away.
+    const routes = result.map((s) => s.route);
+    expect(routes).not.toContain('/b');
+    expect(new Set(routes).size).toBe(routes.length);
+  });
+
+  test('returns empty array for empty input', () => {
+    expect(deduplicateShortcutRoutes([])).toEqual([]);
+  });
+
+  test('returns input as-is for non-array', () => {
+    expect(deduplicateShortcutRoutes(null)).toBeNull();
+    expect(deduplicateShortcutRoutes(undefined)).toBeUndefined();
+  });
+
+  test('handles shortcuts without route string', () => {
+    const result = deduplicateShortcutRoutes([
+      { route: '/a' },
+      { route: null },
+      {},
+      { route: 123 },
+    ]);
+    expect(result).toHaveLength(1);
+    expect(result[0].route).toBe('/a');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Integration: finalizeValidInstantResponse
+  // ---------------------------------------------------------------------------
+
+  test('finalizeValidInstantResponse applies route deduplication', () => {
+    const response = geminiResponse();
+    const clientCapabilities = capabilities();
+    const signals = { rulesApplied: ['RULE-002'] };
+
+    const result = finalizeValidInstantResponse(response, clientCapabilities, signals);
+
+    // nextStepPrediction.targetRoute is '/agendaPage' and infoRecommendation.ctaRoute
+    // was also '/agendaPage'. buildDeduplicatedCtaRoute maps /agendaPage → /relatoriosPage
+    // which is in ALLOWED_INFO_CTA_ROUTES, so ctaRoute should change.
+    expect(result.infoRecommendation.ctaRoute).toBe('/relatoriosPage');
   });
 });

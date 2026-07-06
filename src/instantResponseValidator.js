@@ -15,6 +15,8 @@ const { RULE_IDS } = require('./instantDomainRules');
 const {
   buildInfoRecommendationFallback,
   supportedInfoTypesFromCapabilities,
+  buildDeduplicatedCtaRoute,
+  deduplicateShortcutRoutes,
 } = require('./instantInfoRecommendationBuilder');
 
 const UNSAFE_INFO_TEXT_PATTERN = /(?:\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b|@|https?:\/\/|resourceName|cpf|cnpj)/i;
@@ -216,6 +218,13 @@ function finalizeValidInstantResponse(response, clientCapabilities, signals) {
     ? response.infoRecommendation
     : buildInfoRecommendationFallback({ signals, clientCapabilities });
 
+  if (infoRecommendation && response.nextStepPrediction?.targetRoute) {
+    infoRecommendation.ctaRoute = buildDeduplicatedCtaRoute(
+      response.nextStepPrediction.targetRoute,
+      ALLOWED_INFO_CTA_ROUTES,
+    );
+  }
+
   const normalizedShortcuts = (response.shortcuts || []).map((sc) => {
     const description = sc.description || sc.reason || '';
     return {
@@ -226,9 +235,14 @@ function finalizeValidInstantResponse(response, clientCapabilities, signals) {
     };
   });
 
+  const deduplicatedShortcuts = deduplicateShortcutRoutes(
+    normalizedShortcuts,
+    response.nextStepPrediction?.targetRoute || '',
+  );
+
   return {
     ...response,
-    shortcuts: normalizedShortcuts,
+    shortcuts: deduplicatedShortcuts,
     mode: ADAPTIVE_MODES.INSTANT,
     source: ADAPTIVE_SOURCES.ADAPTIVE,
     visualPriority: VISUAL_PRIORITIES.MODERATE,
