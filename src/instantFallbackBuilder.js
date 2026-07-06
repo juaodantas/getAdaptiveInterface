@@ -10,47 +10,42 @@ const { buildInfoRecommendationFallback } = require('./instantInfoRecommendation
 const STEP_COPY = {
   create_lot_with_protocol: {
     title: 'Cadastre um lote com protocolo',
-    description: 'Comece vinculando um protocolo ao lote para gerar próximas atividades.',
+    description: 'Comece vinculando um protocolo ao lote para gerar as primeiras atividades.',
     actionLabel: 'Abrir Protocolos',
   },
-  check_generated_agenda_activities: {
+  check_generated_activities: {
     title: 'Verifique as atividades geradas na Agenda',
-    description: 'O lote com protocolo já foi criado. Agora confira as atividades geradas para continuar o fluxo.',
+    description: 'O lote com protocolo já foi criado. Confira as atividades geradas para o primeiro dia.',
     actionLabel: 'Abrir Agenda',
   },
-  execute_nutrition_adjustment: {
-    title: 'Execute o ajuste nutricional pendente',
-    description: 'Há um ajuste nutricional pendente para manter o roteiro operacional.',
-    actionLabel: 'Abrir Solução',
-  },
-  check_field_notebook: {
-    title: 'Confira o registro no Caderno de Campo',
-    description: 'Depois do ajuste, valide o registro operacional no caderno.',
+  record_caderno_adjustment: {
+    title: 'Registre o ajuste no Caderno de Campo',
+    description: 'As atividades foram verificadas. Agora registre a execução do ajuste no caderno de campo.',
     actionLabel: 'Abrir Caderno',
   },
   finish_agenda_activities: {
     title: 'Conclua as pendências na Agenda',
-    description: 'Ainda há atividades pendentes após a conferência do caderno.',
+    description: 'O ajuste foi registrado. Finalize as atividades do primeiro dia na Agenda.',
     actionLabel: 'Abrir Agenda',
   },
-  review_final_home_context: {
+  review_final_home: {
     title: 'Confira o resumo final do fluxo',
-    description: 'As atividades principais foram concluídas. Revise o contexto final.',
+    description: 'Todas as atividades foram concluídas. Revise o resumo final pela Home.',
+    actionLabel: 'Ver Relatórios',
+  },
+  test_complete: {
+    title: 'Roteiro de teste concluído',
+    description: 'Você completou todas as etapas do roteiro. Confira o resumo nos relatórios.',
     actionLabel: 'Ver Relatórios',
   },
   review_critical_alerts: {
     title: 'Revise alertas operacionais críticos',
-    description: 'Há alertas críticos que devem receber prioridade antes de produção.',
+    description: 'Há alertas críticos que devem receber prioridade antes de continuar.',
     actionLabel: 'Abrir Agenda',
   },
-  resolve_overdue_agenda_tasks: {
+  resolve_overdue_tasks: {
     title: 'Resolva tarefas atrasadas',
     description: 'Existem atividades atrasadas e a Agenda deve ser priorizada.',
-    actionLabel: 'Abrir Agenda',
-  },
-  review_agenda_context: {
-    title: 'Revise o próximo contexto na Agenda',
-    description: 'A Agenda é o caminho seguro para continuar o roteiro operacional.',
     actionLabel: 'Abrir Agenda',
   },
 };
@@ -58,7 +53,7 @@ const STEP_COPY = {
 function buildEnhancedInstantFallback({ operationalContext, clientCapabilities, reason = 'deterministic_fallback' }) {
   const signals = deriveInstantSignals(operationalContext);
   const dashboard = DASHBOARD_CONFIG[signals.dashboardId] || DASHBOARD_CONFIG.TAREFAS_PENDENTES;
-  const copy = STEP_COPY[signals.stepId] || STEP_COPY.review_agenda_context;
+  const copy = STEP_COPY[signals.stepId] || STEP_COPY.create_lot_with_protocol;
   const confidence = reason === 'gemini_invalid_response' ? 0.68 : 0.64;
 
   return {
@@ -116,7 +111,7 @@ function buildEnhancedInstantFallback({ operationalContext, clientCapabilities, 
       display: 'info_icon',
     },
     rulesApplied: signals.rulesApplied,
-    infoRecommendation: buildInfoRecommendationFallback({ signals, clientCapabilities }),
+    infoRecommendation: buildInfoRecommendationFallback({ signals, clientCapabilities, operationalContext }),
     fallback: {
       used: true,
       reason,

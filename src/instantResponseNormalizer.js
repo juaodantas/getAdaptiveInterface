@@ -43,7 +43,7 @@ function normalizeDashboardFields(raw) {
   return { dashboard: config.displayName, dashboardId: config.id, cardType: config.cardType };
 }
 
-function normalizeInstantResponse(raw, clientCapabilities, signals) {
+function normalizeInstantResponse(raw, clientCapabilities, signals, operationalContext) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     return null;
   }
@@ -80,7 +80,7 @@ function normalizeInstantResponse(raw, clientCapabilities, signals) {
   const legacyReasonDetails = raw.reason && typeof raw.reason === 'object' ? raw.reason : {};
   const reasonDetails = Object.keys(rawReasonDetails).length > 0 ? rawReasonDetails : legacyReasonDetails;
   const reason = typeof raw.reason === 'string' ? raw.reason : null;
-  const infoRecommendation = normalizeInfoWithSignal(raw.infoRecommendation, clientCapabilities, signals || { rulesApplied: raw.rulesApplied });
+  const infoRecommendation = normalizeInfoWithSignal(raw.infoRecommendation, clientCapabilities, signals || { rulesApplied: raw.rulesApplied }, operationalContext);
 
   return {
     responseVersion: '1.0',

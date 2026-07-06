@@ -45,6 +45,15 @@ function buildInstantPrompt({ navigationContext, sessionNavigations, operational
     domainRules: DOMAIN_RULES,
   };
 
+  // If agenda has last interaction context, include it (sanitized)
+  if (operationalContext.agendaState && operationalContext.agendaState.lastInteractionType) {
+    promptPayload.lastAgendaInteraction = {
+      type: operationalContext.agendaState.lastInteractionType,
+      title: operationalContext.agendaState.lastActivityTitle || null,
+      description: operationalContext.agendaState.lastActivityDescription || null,
+    };
+  }
+
   return `Você é um recomendador conservador para um app agrícola.
 Use somente flags, contagens, rotas e categorias técnicas do JSON abaixo.
 Não invente entidades, nomes de lotes, usuários, tarefas ou textos livres identificáveis.
@@ -69,6 +78,15 @@ Retorne APENAS JSON válido, sem markdown, seguindo o schema obrigatório:
   "rulesApplied":["RULE-010"],
   "infoRecommendation":{"type":"today_cultivation|reservoir_report|day_progress|field_notes_summary|basic_tip","source":"isis|local_tip|fallback","priority":"low|medium|high","title":"texto curto genérico","reason":"texto curto genérico","ctaRoute":"/rota allowlisted","category":"geral|agenda|lote|protocolo|solucao|reservatorio|caderno_campo|cultivo"}
 }
+
+Se disponível, a última interação na Agenda foi:
+  tipo=<tipo>
+  título="<título>"
+
+Use essa informação para contextualizar a infoRecommendation (title e reason),
+mas NÃO repita o título da atividade como texto livre no title/reason se ele
+contiver dados sensíveis. Prefira generalizar: "Aplicação de nutrientes" →
+"atividade de aplicação".
 
 JSON de contexto sanitizado:
 ${JSON.stringify(promptPayload)}`;

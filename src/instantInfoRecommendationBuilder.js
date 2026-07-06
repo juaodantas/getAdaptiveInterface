@@ -37,20 +37,20 @@ const INFO_BY_RULE = {
   [RULE_IDS.NO_PROTOCOL_LOT]: {
     type: 'basic_tip', category: 'protocolo', source: 'local_tip', priority: 'high', ctaRoute: '/protocoloPage',
   },
-  [RULE_IDS.AGENDA_AFTER_LOT_WITH_PROTOCOL]: {
+  [RULE_IDS.CHECK_GENERATED_ACTIVITIES]: {
     type: 'day_progress', category: 'agenda', source: 'isis', priority: 'high', ctaRoute: '/agendaPage',
   },
-  [RULE_IDS.PENDING_NUTRITION_ADJUSTMENT]: {
-    type: 'today_cultivation', category: 'solucao', source: 'isis', priority: 'high', ctaRoute: '/solucaoPage',
+  [RULE_IDS.RECORD_CADERNO_ADJUSTMENT]: {
+    type: 'field_notes_summary', category: 'caderno_campo', source: 'isis', priority: 'high', ctaRoute: '/cadernoCampoPage',
   },
-  [RULE_IDS.FIELD_NOTEBOOK_AFTER_ADJUSTMENT]: {
-    type: 'field_notes_summary', category: 'caderno_campo', source: 'isis', priority: 'medium', ctaRoute: '/cadernoCampoPage',
-  },
-  [RULE_IDS.FINISH_AGENDA_AFTER_NOTEBOOK]: {
+  [RULE_IDS.FINISH_AGENDA_ACTIVITIES]: {
     type: 'day_progress', category: 'agenda', source: 'isis', priority: 'medium', ctaRoute: '/agendaPage',
   },
-  [RULE_IDS.FINAL_HOME_CHECK]: {
+  [RULE_IDS.REVIEW_FINAL_HOME]: {
     type: 'day_progress', category: 'geral', source: 'local_tip', priority: 'low', ctaRoute: '/relatoriosPage',
+  },
+  [RULE_IDS.TEST_COMPLETE]: {
+    type: 'basic_tip', category: 'geral', source: 'local_tip', priority: 'low', ctaRoute: '/relatoriosPage',
   },
   [RULE_IDS.OVERDUE_TASKS]: {
     type: 'day_progress', category: 'agenda', source: 'isis', priority: 'high', ctaRoute: '/agendaPage',
@@ -77,6 +77,10 @@ function trimSafeText(value, maxLength) {
 
 function localTemplateForType(type) {
   return INFO_TEMPLATES[type] || INFO_TEMPLATES.basic_tip;
+}
+
+function hasRecentAgendaInteraction(agendaState) {
+  return agendaState && typeof agendaState.lastInteractionType === 'string';
 }
 
 function isValidInfoRecommendation(infoRecommendation, clientCapabilities = {}) {
@@ -131,34 +135,78 @@ function inferRuleId(signals = {}) {
   return null;
 }
 
-function buildInfoRecommendationFallback({ signals = {}, clientCapabilities = {} } = {}) {
+function buildInfoRecommendationFallback({ signals = {}, clientCapabilities = {}, operationalContext = {} } = {}) {
   const supportedInfoTypes = supportedInfoTypesFromCapabilities(clientCapabilities);
   const ruleId = inferRuleId(signals);
-  const base = ruleId ? INFO_BY_RULE[ruleId] : {
-    type: 'basic_tip',
-    category: 'geral',
-    source: 'local_tip',
-    priority: 'low',
-    ctaRoute: '/areaCultivoPage',
-  };
+  let base = ruleId ? INFO_BY_RULE[ruleId] : null;
+  let template = null;
+
+  // Override based on last agenda interaction context (enriched from frontend)
+  const agendaState = operationalContext.agendaState || {};
+  if (hasRecentAgendaInteraction(agendaState)) {
+    const interactionType = agendaState.lastInteractionType;
+    const activityTitle = agendaState.lastActivityTitle;
+
+    if (interactionType === 'completed') {
+      base = {
+        type: 'day_progress',
+        category: 'agenda',
+        source: 'isis',
+        priority: 'medium',
+        ctaRoute: '/agendaPage',
+      };
+      const titleHint = activityTitle ? `"${activityTitle}"` : 'a atividade';
+      template = { title: 'Atividade concluída', reason: `${titleHint} foi concluída. Confira os próximos passos na Agenda.` };
+    } else if (interactionType === 'created') {
+      base = {
+        type: 'day_progress',
+        category: 'agenda',
+        source: 'isis',
+        priority: 'medium',
+        ctaRoute: '/agendaPage',
+      };
+      const titleHint = activityTitle ? `"${activityTitle}"` : 'Nova atividade';
+      template = { title: 'Atividade criada', reason: `${titleHint} foi criada. Veja as atividades do dia na Agenda.` };
+    } else if (interactionType === 'viewed' || interactionType === 'edited') {
+      base = {
+        type: 'today_cultivation',
+        category: 'cultivo',
+        source: 'local_tip',
+        priority: 'low',
+        ctaRoute: '/agendaPage',
+      };
+    }
+  }
+
+  // After potential context override:
+  if (!base) {
+    base = {
+      type: 'basic_tip',
+      category: 'geral',
+      source: 'local_tip',
+      priority: 'low',
+      ctaRoute: '/areaCultivoPage',
+    };
+  }
+
   const type = selectSupportedType(base.type, supportedInfoTypes);
-  const template = localTemplateForType(type);
+  const resolvedTemplate = template || localTemplateForType(type);
 
   return {
     type,
     source: type === base.type ? base.source : 'fallback',
     priority: type === base.type ? base.priority : 'low',
-    title: template.title,
-    reason: template.reason,
+    title: resolvedTemplate.title,
+    reason: resolvedTemplate.reason,
     ctaRoute: type === base.type ? base.ctaRoute : '/areaCultivoPage',
     category: type === base.type ? base.category : 'geral',
   };
 }
 
-function normalizeInfoWithSignal(raw, clientCapabilities, signals) {
+function normalizeInfoWithSignal(raw, clientCapabilities, signals, operationalContext) {
   const normalized = normalizeInfoRecommendation(raw, clientCapabilities);
   if (!normalized) {
-    return buildInfoRecommendationFallback({ signals, clientCapabilities });
+    return buildInfoRecommendationFallback({ signals, clientCapabilities, operationalContext });
   }
 
   const ruleId = inferRuleId(signals);
@@ -174,7 +222,7 @@ function normalizeInfoWithSignal(raw, clientCapabilities, signals) {
   // Se o tipo retornado (por Gemini ou outro) difere do esperado pela regra,
   // rejeita e usa fallback determinístico
   if (normalized.type !== expected.type) {
-    return buildInfoRecommendationFallback({ signals, clientCapabilities });
+    return buildInfoRecommendationFallback({ signals, clientCapabilities, operationalContext });
   }
 
   return normalized;
