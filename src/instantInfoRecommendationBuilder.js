@@ -261,13 +261,12 @@ function deduplicateShortcutRoutes(shortcuts, primaryRoute) {
     }
   }
 
-  const primaryIndex = deduplicated.findIndex((sc) => sc.group === 'primary');
-  if (primaryIndex >= 0 && deduplicated[primaryIndex].route === primaryRoute) {
-    const swapCandidate = deduplicated.find(
-      (sc, i) => i !== primaryIndex && sc.route !== primaryRoute,
-    );
-    if (swapCandidate) {
-      deduplicated[primaryIndex] = { ...deduplicated[primaryIndex], route: swapCandidate.route };
+  const replacementRoute = deduplicated.find((sc) => sc.route !== primaryRoute);
+  if (replacementRoute) {
+    for (let i = 0; i < deduplicated.length; i++) {
+      if (deduplicated[i].route === primaryRoute) {
+        deduplicated[i] = { ...deduplicated[i], route: replacementRoute.route };
+      }
     }
   }
 
