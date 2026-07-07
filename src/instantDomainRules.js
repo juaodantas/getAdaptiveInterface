@@ -134,9 +134,11 @@ function deriveInstantSignals(context) {
   // Isso protege contra perda de progresso quando o usuário faz logout (os sinais de sessão
   // são zerados, mas o estado do servidor permanece).
   const effective = {
-    lotWithProtocolCreated: sequence.lotWithProtocolCreated || dashboard.hasProtocolLinkedToLatestLot,
+    lotWithProtocolCreated: sequence.lotWithProtocolCreated
+      || dashboard.hasProtocolLinkedToLatestLot
+      || (dashboard.hasActiveLots && agenda.hasGeneratedActivities),
     generatedActivitiesSeen: sequence.generatedActivitiesSeen
-      || (agenda.hasGeneratedActivities && dashboard.hasProtocolLinkedToLatestLot),
+      || (agenda.hasGeneratedActivities && (dashboard.hasProtocolLinkedToLatestLot || dashboard.hasActiveLots)),
     adjustmentRecorded: sequence.adjustmentRecorded || notebook.hasRecentNutritionAdjustmentRecord,
     agendaActivitiesCompleted: sequence.agendaActivitiesCompleted,
     finalHomeChecked: sequence.finalHomeChecked,
