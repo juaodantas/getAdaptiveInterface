@@ -24,72 +24,101 @@ const DOMAIN_RULES = [
   { id: RULE_IDS.NO_PROGRESS_BAR, description: 'Componente de progresso, stepper ou checklist é proibido.' },
 ];
 
-const STEP_ROUTE_RANKING = {
+const ROUTE_CONFLICT_RESOLVER = {
+  create_lot_with_protocol: {
+    '/protocoloPage': '/lotePage',
+    '/lotePage': '/areaCultivoPage',
+    '/areaCultivoPage': '/protocoloPage',
+  },
+  check_generated_activities: {
+    '/agendaPage': '/lotePage',
+    '/lotePage': '/protocoloPage',
+    '/protocoloPage': '/areaCultivoPage',
+  },
+  record_caderno_adjustment: {
+    '/cadernoCampoPage': '/relatoriosPage',
+    '/solucaoPage': '/agendaPage',
+    '/agendaPage': '/relatoriosPage',
+  },
+  finish_agenda_activities: {
+    '/agendaPage': '/relatoriosPage',
+    '/cadernoCampoPage': '/solucaoPage',
+    '/relatoriosPage': '/historicoPage',
+  },
+  review_final_home: {
+    '/relatoriosPage': '/agendaPage',
+    '/agendaPage': '/solucaoPage',
+    '/solucaoPage': '/relatoriosPage',
+  },
+  test_complete: {
+    '/relatoriosPage': '/agendaPage',
+    '/agendaPage': '/protocoloPage',
+    '/protocoloPage': '/relatoriosPage',
+  },
+  review_critical_alerts: {
+    '/agendaPage': '/gerenciarEquipePage',
+    '/gerenciarEquipePage': '/relatoriosPage',
+    '/relatoriosPage': '/agendaPage',
+  },
+  resolve_overdue_tasks: {
+    '/agendaPage': '/gerenciarEquipePage',
+    '/gerenciarEquipePage': '/relatoriosPage',
+    '/relatoriosPage': '/agendaPage',
+  },
+};
+
+const STEP_SHORTCUTS = {
   create_lot_with_protocol: [
-    '/protocoloPage',
-    '/lotePage',
-    '/areaCultivoPage',
-    '/agendaPage',
-    '/solucaoPage',
-    '/relatoriosPage',
+    { route: '/protocoloPage', label: 'Criar Protocolo', description: 'Vincule um protocolo ao lote ativo', group: 'primary' },
+    { route: '/lotePage', label: 'Ver Lotes', description: 'Revise os lotes que precisam de protocolo', group: 'secondary' },
+    { route: '/areaCultivoPage', label: 'Área Cultivo', description: 'Gerencie as áreas de cultivo', group: 'contextual' },
   ],
   check_generated_activities: [
-    '/agendaPage',
-    '/lotePage',
-    '/protocoloPage',
-    '/cadernoCampoPage',
-    '/relatoriosPage',
-    '/solucaoPage',
+    { route: '/agendaPage', label: 'Ver Atividades', description: 'Confira as atividades geradas na agenda', group: 'primary' },
+    { route: '/lotePage', label: 'Ver Lote', description: 'Consulte o lote vinculado ao protocolo', group: 'secondary' },
+    { route: '/protocoloPage', label: 'Protocolo', description: 'Revise o protocolo criado para o lote', group: 'contextual' },
   ],
   record_caderno_adjustment: [
-    '/cadernoCampoPage',
-    '/solucaoPage',
-    '/agendaPage',
-    '/relatoriosPage',
-    '/protocoloPage',
-    '/historicoPage',
+    { route: '/cadernoCampoPage', label: 'Registrar Ajuste', description: 'Registre a execução do ajuste no caderno de campo', group: 'primary' },
+    { route: '/agendaPage', label: 'Ver Agenda', description: 'Consulte a programação de atividades', group: 'secondary' },
+    { route: '/solucaoPage', label: 'Solução', description: 'Acesse a solução aplicada ao cultivo', group: 'contextual' },
   ],
   finish_agenda_activities: [
-    '/agendaPage',
-    '/cadernoCampoPage',
-    '/relatoriosPage',
-    '/solucaoPage',
-    '/gerenciarEquipePage',
-    '/historicoPage',
+    { route: '/agendaPage', label: 'Concluir Tarefas', description: 'Finalize as atividades pendentes na agenda', group: 'primary' },
+    { route: '/cadernoCampoPage', label: 'Caderno', description: 'Confira os últimos registros no caderno', group: 'secondary' },
+    { route: '/relatoriosPage', label: 'Resumo', description: 'Veja o resumo das atividades do dia', group: 'contextual' },
   ],
   review_final_home: [
-    '/relatoriosPage',
-    '/agendaPage',
-    '/solucaoPage',
-    '/historicoPage',
-    '/gerenciarEquipePage',
-    '/cadernoCampoPage',
+    { route: '/relatoriosPage', label: 'Ver Relatórios', description: 'Confira o resumo final do fluxo operacional', group: 'primary' },
+    { route: '/agendaPage', label: 'Histórico', description: 'Veja o histórico de atividades concluídas', group: 'secondary' },
+    { route: '/solucaoPage', label: 'Soluções', description: 'Revise as soluções aplicadas', group: 'contextual' },
   ],
   test_complete: [
-    '/relatoriosPage',
-    '/agendaPage',
-    '/protocoloPage',
-    '/historicoPage',
-    '/gerenciarEquipePage',
-    '/cadernoCampoPage',
+    { route: '/relatoriosPage', label: 'Ver Relatórios', description: 'Revise o resumo completo do roteiro', group: 'primary' },
+    { route: '/agendaPage', label: 'Agenda', description: 'Acesse o histórico de atividades', group: 'secondary' },
+    { route: '/protocoloPage', label: 'Protocolo', description: 'Consulte o protocolo utilizado', group: 'contextual' },
   ],
   review_critical_alerts: [
-    '/agendaPage',
-    '/gerenciarEquipePage',
-    '/relatoriosPage',
-    '/historicoPage',
-    '/cadernoCampoPage',
-    '/solucaoPage',
+    { route: '/agendaPage', label: 'Ver Alertas', description: 'Revise os alertas críticos operacionais', group: 'primary' },
+    { route: '/gerenciarEquipePage', label: 'Gerenciar Equipe', description: 'Verifique a alocação da equipe', group: 'secondary' },
+    { route: '/relatoriosPage', label: 'Relatórios', description: 'Acesse relatórios de ocorrências', group: 'contextual' },
   ],
   resolve_overdue_tasks: [
-    '/agendaPage',
-    '/gerenciarEquipePage',
-    '/relatoriosPage',
-    '/cadernoCampoPage',
-    '/historicoPage',
-    '/solucaoPage',
+    { route: '/agendaPage', label: 'Ver Tarefas', description: 'Resolva as tarefas atrasadas na agenda', group: 'primary' },
+    { route: '/gerenciarEquipePage', label: 'Equipe', description: 'Atribua tarefas à equipe', group: 'secondary' },
+    { route: '/relatoriosPage', label: 'Relatórios', description: 'Veja o relatório de atrasos', group: 'contextual' },
   ],
 };
+
+function applyShortcutConfidence(shortcuts, baseConfidence) {
+  return shortcuts.map((shortcut, index) => {
+    const multiplier = index === 0 ? 1.0 : index === 1 ? 0.85 : 0.75;
+    return {
+      ...shortcut,
+      confidence: Math.round(baseConfidence * multiplier * 100) / 100,
+    };
+  });
+}
 
 function deriveInstantSignals(context) {
   const dashboard = context.dashboardState;
@@ -100,65 +129,57 @@ function deriveInstantSignals(context) {
   const sequence = context.testSequenceSignals;
   const rulesApplied = [RULE_IDS.NO_PROGRESS_BAR];
 
-  // Priority 1: Critical alerts override sequence
   if (alerts.hasCriticalAlerts || alerts.criticalCount > 0) {
     rulesApplied.push(RULE_IDS.CRITICAL_ALERTS);
-    return { stepId: 'review_critical_alerts', targetRoute: '/agendaPage', dashboardId: 'SAUDE_EQUIPES', rulesApplied, ranking: STEP_ROUTE_RANKING.review_critical_alerts };
+    return { stepId: 'review_critical_alerts', targetRoute: '/agendaPage', dashboardId: 'SAUDE_EQUIPES', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.review_critical_alerts, 0.85) };
   }
 
-  // Priority 2: Overdue tasks with no sequence
   if (agenda.overdueActivitiesCount > 0 && !sequence.lotWithProtocolCreated) {
     rulesApplied.push(RULE_IDS.OVERDUE_TASKS);
-    return { stepId: 'resolve_overdue_tasks', targetRoute: '/agendaPage', dashboardId: 'TAREFAS_PENDENTES', rulesApplied, ranking: STEP_ROUTE_RANKING.resolve_overdue_tasks };
+    return { stepId: 'resolve_overdue_tasks', targetRoute: '/agendaPage', dashboardId: 'TAREFAS_PENDENTES', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.resolve_overdue_tasks, 0.85) };
   }
 
-  // Step 1: No protocol lot
   if (!dashboard.hasProtocolLinkedToLatestLot && !sequence.lotWithProtocolCreated) {
     rulesApplied.push(RULE_IDS.NO_PROTOCOL_LOT);
-    return { stepId: 'create_lot_with_protocol', targetRoute: '/protocoloPage', dashboardId: 'LOTE_PRODUCAO', rulesApplied, ranking: STEP_ROUTE_RANKING.create_lot_with_protocol };
+    return { stepId: 'create_lot_with_protocol', targetRoute: '/protocoloPage', dashboardId: 'LOTE_PRODUCAO', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.create_lot_with_protocol, 0.85) };
   }
 
-  // Step 2: Protocol created, activities not yet seen
   if ((dashboard.hasProtocolLinkedToLatestLot || sequence.lotWithProtocolCreated) && !sequence.generatedActivitiesSeen) {
     rulesApplied.push(RULE_IDS.CHECK_GENERATED_ACTIVITIES);
-    return { stepId: 'check_generated_activities', targetRoute: '/agendaPage', dashboardId: 'TAREFAS_PENDENTES', rulesApplied, ranking: STEP_ROUTE_RANKING.check_generated_activities };
+    return { stepId: 'check_generated_activities', targetRoute: '/agendaPage', dashboardId: 'TAREFAS_PENDENTES', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.check_generated_activities, 0.75) };
   }
 
-  // Step 3: Activities seen, adjustment not yet recorded in caderno
   if (sequence.generatedActivitiesSeen && !sequence.adjustmentRecorded) {
     rulesApplied.push(RULE_IDS.RECORD_CADERNO_ADJUSTMENT);
-    return { stepId: 'record_caderno_adjustment', targetRoute: '/cadernoCampoPage', dashboardId: 'TAREFAS_PENDENTES', rulesApplied, ranking: STEP_ROUTE_RANKING.record_caderno_adjustment };
+    return { stepId: 'record_caderno_adjustment', targetRoute: '/cadernoCampoPage', dashboardId: 'TAREFAS_PENDENTES', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.record_caderno_adjustment, 0.75) };
   }
 
-  // Step 4: Adjustment recorded, agenda activities pending
   if (sequence.adjustmentRecorded && agenda.pendingActivitiesTodayCount > 0 && !sequence.agendaActivitiesCompleted) {
     rulesApplied.push(RULE_IDS.FINISH_AGENDA_ACTIVITIES);
-    return { stepId: 'finish_agenda_activities', targetRoute: '/agendaPage', dashboardId: 'TAREFAS_PENDENTES', rulesApplied, ranking: STEP_ROUTE_RANKING.finish_agenda_activities };
+    return { stepId: 'finish_agenda_activities', targetRoute: '/agendaPage', dashboardId: 'TAREFAS_PENDENTES', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.finish_agenda_activities, 0.65) };
   }
 
-  // Step 5: All done, final home review
   if (sequence.agendaActivitiesCompleted && !sequence.finalHomeChecked) {
     rulesApplied.push(RULE_IDS.REVIEW_FINAL_HOME);
-    return { stepId: 'review_final_home', targetRoute: '/relatoriosPage', dashboardId: 'TAREFAS_PENDENTES', rulesApplied, ranking: STEP_ROUTE_RANKING.review_final_home };
+    return { stepId: 'review_final_home', targetRoute: '/relatoriosPage', dashboardId: 'TAREFAS_PENDENTES', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.review_final_home, 0.65) };
   }
 
-  // Step 6 (terminal): Test complete
   if (sequence.finalHomeChecked) {
     rulesApplied.push(RULE_IDS.TEST_COMPLETE);
-    return { stepId: 'test_complete', targetRoute: '/relatoriosPage', dashboardId: 'TAREFAS_PENDENTES', rulesApplied, ranking: STEP_ROUTE_RANKING.test_complete };
+    return { stepId: 'test_complete', targetRoute: '/relatoriosPage', dashboardId: 'TAREFAS_PENDENTES', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.test_complete, 0.5) };
   }
 
-  // No production data - avoid empty production
   if (!production.hasProductionData) {
     rulesApplied.push(RULE_IDS.AVOID_EMPTY_PRODUCTION);
   }
 
-  return { stepId: 'create_lot_with_protocol', targetRoute: '/protocoloPage', dashboardId: 'LOTE_PRODUCAO', rulesApplied, ranking: STEP_ROUTE_RANKING.create_lot_with_protocol };
+  return { stepId: 'create_lot_with_protocol', targetRoute: '/protocoloPage', dashboardId: 'LOTE_PRODUCAO', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.create_lot_with_protocol, 0.65) };
 }
 
 module.exports = {
   RULE_IDS,
   DOMAIN_RULES,
   deriveInstantSignals,
-  STEP_ROUTE_RANKING,
+  STEP_SHORTCUTS,
+  ROUTE_CONFLICT_RESOLVER,
 };

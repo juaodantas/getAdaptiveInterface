@@ -5,7 +5,7 @@ const {
   INFO_RECOMMENDATION_SOURCES,
   INFO_RECOMMENDATION_TYPES,
 } = require('./adaptiveContract');
-const { RULE_IDS } = require('./instantDomainRules');
+const { RULE_IDS, ROUTE_CONFLICT_RESOLVER } = require('./instantDomainRules');
 
 const FALLBACK_TYPE_ORDER = ['basic_tip', 'day_progress', 'today_cultivation', 'field_notes_summary', 'reservoir_report'];
 const SAFE_TEXT_PATTERN = /(?:\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b|@|https?:\/\/|resourceName|cpf|cnpj)/i;
@@ -224,10 +224,43 @@ function normalizeInfoWithSignal(raw, clientCapabilities, signals, operationalCo
   return normalized;
 }
 
+function resolveRouteConflicts(stepId, nextStepRoute, infoCtaRoute, shortcuts) {
+  const resolver = ROUTE_CONFLICT_RESOLVER[stepId];
+  if (!resolver) return { nextStepRoute, infoCtaRoute, shortcuts };
+
+  const usedRoutes = new Set();
+  const resolvedInfoCta = (infoCtaRoute && (infoCtaRoute === nextStepRoute || usedRoutes.has(infoCtaRoute)))
+    ? (resolver[infoCtaRoute] || infoCtaRoute)
+    : infoCtaRoute;
+  if (resolvedInfoCta) usedRoutes.add(resolvedInfoCta);
+  if (nextStepRoute) usedRoutes.add(nextStepRoute);
+
+  const resolvedShortcuts = (shortcuts || []).slice(0, 3).map((sc) => {
+    if (!sc || !sc.route) return sc;
+    if (!usedRoutes.has(sc.route)) {
+      usedRoutes.add(sc.route);
+      return sc;
+    }
+    const alternative = resolver[sc.route] || null;
+    if (alternative && !usedRoutes.has(alternative)) {
+      usedRoutes.add(alternative);
+      return { ...sc, route: alternative };
+    }
+    return null;
+  }).filter(Boolean);
+
+  return {
+    nextStepRoute,
+    infoCtaRoute: resolvedInfoCta || infoCtaRoute,
+    shortcuts: resolvedShortcuts,
+  };
+}
+
 module.exports = {
   buildInfoRecommendationFallback,
   isValidInfoRecommendation,
   normalizeInfoRecommendation,
   normalizeInfoWithSignal,
   supportedInfoTypesFromCapabilities,
+  resolveRouteConflicts,
 };

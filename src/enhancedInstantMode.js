@@ -41,7 +41,7 @@ async function buildEnhancedInstantRecommendation({
       });
     }
 
-    const normalized = normalizeInstantResponse(parsed, clientCapabilities, signals);
+    const normalized = normalizeInstantResponse(parsed, clientCapabilities, signals, operationalContext);
     const validation = validateInstantResponse(normalized, clientCapabilities);
 
     if (!validation.valid) {
