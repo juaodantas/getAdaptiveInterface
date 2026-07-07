@@ -248,7 +248,9 @@ describe('Enhanced INSTANT mode contract', () => {
 
     expect(response.fallback.used).toBe(true);
     expect(response.source).toBe('fallback');
-    expect(response.nextStepPrediction.targetRoute).toBe('/agendaPage');
+    // Com effective signals, validContext() infere generatedActivitiesSeen=true
+    // (hasGeneratedActivities && hasProtocolLinkedToLatestLot), indo para step 3
+    expect(response.nextStepPrediction.targetRoute).toBe('/cadernoCampoPage');
   });
 
   test('finalizer applies conflict resolution and marks non-fallback', () => {

@@ -129,46 +129,68 @@ function deriveInstantSignals(context) {
   const sequence = context.testSequenceSignals;
   const rulesApplied = [RULE_IDS.NO_PROGRESS_BAR];
 
+  // Sinais efetivos: combinam o que veio da sessão (testSequenceSignals)
+  // com o que é objetivamente constatável do estado persistente (dashboard, agenda, notebook).
+  // Isso protege contra perda de progresso quando o usuário faz logout (os sinais de sessão
+  // são zerados, mas o estado do servidor permanece).
+  const effective = {
+    lotWithProtocolCreated: sequence.lotWithProtocolCreated || dashboard.hasProtocolLinkedToLatestLot,
+    generatedActivitiesSeen: sequence.generatedActivitiesSeen
+      || (agenda.hasGeneratedActivities && dashboard.hasProtocolLinkedToLatestLot),
+    adjustmentRecorded: sequence.adjustmentRecorded || notebook.hasRecentNutritionAdjustmentRecord,
+    agendaActivitiesCompleted: sequence.agendaActivitiesCompleted,
+    finalHomeChecked: sequence.finalHomeChecked,
+  };
+
+  // Priority 1: Critical alerts override sequence
   if (alerts.hasCriticalAlerts || alerts.criticalCount > 0) {
     rulesApplied.push(RULE_IDS.CRITICAL_ALERTS);
     return { stepId: 'review_critical_alerts', targetRoute: '/agendaPage', dashboardId: 'SAUDE_EQUIPES', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.review_critical_alerts, 0.85) };
   }
 
-  if (agenda.overdueActivitiesCount > 0 && !sequence.lotWithProtocolCreated) {
+  // Priority 2: Overdue tasks with no protocol (sequence not started)
+  if (agenda.overdueActivitiesCount > 0 && !effective.lotWithProtocolCreated) {
     rulesApplied.push(RULE_IDS.OVERDUE_TASKS);
     return { stepId: 'resolve_overdue_tasks', targetRoute: '/agendaPage', dashboardId: 'TAREFAS_PENDENTES', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.resolve_overdue_tasks, 0.85) };
   }
 
-  if (!dashboard.hasProtocolLinkedToLatestLot && !sequence.lotWithProtocolCreated) {
+  // Step 1: No protocol lot
+  if (!dashboard.hasProtocolLinkedToLatestLot && !effective.lotWithProtocolCreated) {
     rulesApplied.push(RULE_IDS.NO_PROTOCOL_LOT);
     return { stepId: 'create_lot_with_protocol', targetRoute: '/protocoloPage', dashboardId: 'LOTE_PRODUCAO', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.create_lot_with_protocol, 0.85) };
   }
 
-  if ((dashboard.hasProtocolLinkedToLatestLot || sequence.lotWithProtocolCreated) && !sequence.generatedActivitiesSeen) {
+  // Step 2: Protocol created, activities not yet seen
+  if ((dashboard.hasProtocolLinkedToLatestLot || effective.lotWithProtocolCreated) && !effective.generatedActivitiesSeen) {
     rulesApplied.push(RULE_IDS.CHECK_GENERATED_ACTIVITIES);
     return { stepId: 'check_generated_activities', targetRoute: '/agendaPage', dashboardId: 'TAREFAS_PENDENTES', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.check_generated_activities, 0.75) };
   }
 
-  if (sequence.generatedActivitiesSeen && !sequence.adjustmentRecorded) {
+  // Step 3: Activities seen, adjustment not yet recorded
+  if (effective.generatedActivitiesSeen && !effective.adjustmentRecorded) {
     rulesApplied.push(RULE_IDS.RECORD_CADERNO_ADJUSTMENT);
     return { stepId: 'record_caderno_adjustment', targetRoute: '/cadernoCampoPage', dashboardId: 'TAREFAS_PENDENTES', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.record_caderno_adjustment, 0.75) };
   }
 
-  if (sequence.adjustmentRecorded && agenda.pendingActivitiesTodayCount > 0 && !sequence.agendaActivitiesCompleted) {
+  // Step 4: Adjustment recorded, agenda activities pending
+  if (effective.adjustmentRecorded && agenda.pendingActivitiesTodayCount > 0 && !effective.agendaActivitiesCompleted) {
     rulesApplied.push(RULE_IDS.FINISH_AGENDA_ACTIVITIES);
     return { stepId: 'finish_agenda_activities', targetRoute: '/agendaPage', dashboardId: 'TAREFAS_PENDENTES', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.finish_agenda_activities, 0.65) };
   }
 
-  if (sequence.agendaActivitiesCompleted && !sequence.finalHomeChecked) {
+  // Step 5: All done, final home review
+  if (effective.agendaActivitiesCompleted && !effective.finalHomeChecked) {
     rulesApplied.push(RULE_IDS.REVIEW_FINAL_HOME);
     return { stepId: 'review_final_home', targetRoute: '/relatoriosPage', dashboardId: 'TAREFAS_PENDENTES', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.review_final_home, 0.65) };
   }
 
-  if (sequence.finalHomeChecked) {
+  // Step 6 (terminal): Test complete
+  if (effective.finalHomeChecked) {
     rulesApplied.push(RULE_IDS.TEST_COMPLETE);
     return { stepId: 'test_complete', targetRoute: '/relatoriosPage', dashboardId: 'TAREFAS_PENDENTES', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.test_complete, 0.5) };
   }
 
+  // No production data - avoid empty production
   if (!production.hasProductionData) {
     rulesApplied.push(RULE_IDS.AVOID_EMPTY_PRODUCTION);
   }
