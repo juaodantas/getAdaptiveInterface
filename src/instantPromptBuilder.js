@@ -1,12 +1,7 @@
 const {
   ALLOWED_INSTANT_ROUTES,
-  ALLOWED_INFO_CTA_ROUTES,
   DASHBOARD_CONFIG,
   FORBIDDEN_COMPONENTS,
-  INFO_RECOMMENDATION_CATEGORIES,
-  INFO_RECOMMENDATION_PRIORITIES,
-  INFO_RECOMMENDATION_SOURCES,
-  INFO_RECOMMENDATION_TYPES,
 } = require('./adaptiveContract');
 const { DOMAIN_RULES } = require('./instantDomainRules');
 
@@ -16,6 +11,12 @@ function buildInstantPrompt({ navigationContext, sessionNavigations, operational
     displayName: dashboard.displayName,
     cardType: dashboard.cardType,
   }));
+
+  const ranking = Array.isArray(signals.ranking) ? signals.ranking : [];
+  const rankingLabels = ranking.map((route, i) => {
+    const slot = i === 0 ? 'Card principal (próximo passo)' : i === 1 ? 'Card informativo' : `Atalho ${i - 1}`;
+    return `${i + 1}. ${route} → ${slot}`;
+  }).join('\n');
 
   const promptPayload = {
     navigationContext,
@@ -31,28 +32,10 @@ function buildInstantPrompt({ navigationContext, sessionNavigations, operational
     },
     deterministicSignals: signals,
     allowedRoutes: ALLOWED_INSTANT_ROUTES,
-    infoRecommendationContract: {
-      required: true,
-      types: INFO_RECOMMENDATION_TYPES,
-      supportedInfoTypes: clientCapabilities.supportedInfoTypes,
-      sources: INFO_RECOMMENDATION_SOURCES,
-      priorities: INFO_RECOMMENDATION_PRIORITIES,
-      categories: INFO_RECOMMENDATION_CATEGORIES,
-      allowedCtaRoutes: ALLOWED_INFO_CTA_ROUTES,
-    },
     dashboards,
     forbiddenComponents: FORBIDDEN_COMPONENTS,
     domainRules: DOMAIN_RULES,
   };
-
-  // If agenda has last interaction context, include it (sanitized)
-  if (operationalContext.agendaState && operationalContext.agendaState.lastInteractionType) {
-    promptPayload.lastAgendaInteraction = {
-      type: operationalContext.agendaState.lastInteractionType,
-      title: operationalContext.agendaState.lastActivityTitle || null,
-      description: operationalContext.agendaState.lastActivityDescription || null,
-    };
-  }
 
   return `Você é um recomendador conservador para um app agrícola.
 Use somente flags, contagens, rotas e categorias técnicas do JSON abaixo.
@@ -60,33 +43,28 @@ Não invente entidades, nomes de lotes, usuários, tarefas ou textos livres iden
 Não retorne progress bar, stepper, checklist nem componente equivalente.
 Rotas permitidas são somente as listadas em allowedRoutes.
 Componentes permitidos são somente os suportados pelo cliente e não proibidos.
-infoRecommendation é obrigatório, deve usar somente enums/rotas allowlisted do contrato e não pode usar dados identificáveis.
+
+Aqui está o ranking de rotas recomendadas para o passo atual:
+${rankingLabels}
+
+Para cada rota, forneça title (título curto), description (descrição), actionLabel (rótulo do botão)
+e reason (justificativa opcional ou null). Seja genérico e evite dados identificáveis.
+
 Retorne APENAS JSON válido, sem markdown, seguindo o schema obrigatório:
 {
   "responseVersion":"1.0",
-  "dashboard":"nome ou null",
-  "dashboardId":"ID ou null",
-  "cardType":"tipo ou null",
   "confidence":0.0,
-  "nextStepPrediction":{"stepId":"id","confidence":0.0,"title":"texto curto","description":"texto curto","targetRoute":"/rota","actionLabel":"texto curto"},
-  "sectionAdaptations":[{"sectionId":"recommended_actions","component":"NextStepCard","priority":"high","treatment":"prominent","title":"texto curto","description":"texto curto"}],
-  "shortcuts":[{"route":"/rota","confidence":0.0,"label":"texto curto","reason":"texto curto"}],
-  "focus":{"component":"AdaptiveFocusBanner","message":"texto curto","targetSectionId":"recommended_actions","priority":"high"},
-  "uiTreatment":{"density":"comfortable","emphasis":"moderate","animation":"subtle","explanationVisibility":"low","showProgressBar":false},
+  "enrichedRoutes":[
+    {"title":"texto curto","description":"texto curto","actionLabel":"texto curto","reason":"texto curto ou null"},
+    {"title":"texto curto","description":"texto curto","actionLabel":"texto curto","reason":"texto curto ou null"},
+    ...
+  ],
   "reason":"texto curto ou null",
   "reasonDetails":{"summary":"texto curto","details":["sinais técnicos"],"display":"info_icon"},
-  "rulesApplied":["RULE-010"],
-  "infoRecommendation":{"type":"today_cultivation|reservoir_report|day_progress|field_notes_summary|basic_tip","source":"isis|local_tip|fallback","priority":"low|medium|high","title":"texto curto genérico","reason":"texto curto genérico","ctaRoute":"/rota allowlisted","category":"geral|agenda|lote|protocolo|solucao|reservatorio|caderno_campo|cultivo"}
+  "rulesApplied":["RULE-010"]
 }
 
-Se disponível, a última interação na Agenda foi:
-  tipo=<tipo>
-  título="<título>"
-
-Use essa informação para contextualizar a infoRecommendation (title e reason),
-mas NÃO repita o título da atividade como texto livre no title/reason se ele
-contiver dados sensíveis. Prefira generalizar: "Aplicação de nutrientes" →
-"atividade de aplicação".
+O array enrichedRoutes deve ter exatamente ${ranking.length} entradas, uma para cada rota no ranking acima.
 
 JSON de contexto sanitizado:
 ${JSON.stringify(promptPayload)}`;

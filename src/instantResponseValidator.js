@@ -15,9 +15,8 @@ const { RULE_IDS } = require('./instantDomainRules');
 const {
   buildInfoRecommendationFallback,
   supportedInfoTypesFromCapabilities,
-  buildDeduplicatedCtaRoute,
-  deduplicateShortcutRoutes,
 } = require('./instantInfoRecommendationBuilder');
+const { distributeFromRanking } = require('./instantRouteDistributor');
 
 const UNSAFE_INFO_TEXT_PATTERN = /(?:\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b|@|https?:\/\/|resourceName|cpf|cnpj)/i;
 
@@ -103,23 +102,16 @@ function validateRawInstantResponse(response, clientCapabilities) {
   if (hasForbiddenUiEquivalentOutsideExplicitFields(response)) {
     errors.push('forbidden_ui_equivalent_requested');
   }
-  if (Array.isArray(response.shortcuts) && response.shortcuts.length > clientCapabilities.maxShortcuts) {
-    errors.push('too_many_shortcuts');
-  }
-  if (Array.isArray(response.sectionAdaptations)
-    && response.sectionAdaptations.length > clientCapabilities.maxSectionAdaptations) {
-    errors.push('too_many_sections');
+  if (!Array.isArray(response.enrichedRoutes)) {
+    errors.push('missing_enriched_routes');
   }
   if (response.nextStepPrediction?.targetRoute && !isAllowedRoute(response.nextStepPrediction.targetRoute)) {
-    errors.push('invalid_next_step_route');
+    errors.push('invalid_route_in_enriched');
   }
-  if (Array.isArray(response.shortcuts)) {
-    response.shortcuts.forEach((shortcut) => {
-      if (shortcut?.route && !isAllowedRoute(shortcut.route)) errors.push('invalid_shortcut_route');
-    });
-    response.shortcuts.forEach((shortcut) => {
-      if (shortcut?.group && !SHORTCUT_GROUPS.includes(shortcut.group)) {
-        errors.push('invalid_shortcut_group');
+  if (Array.isArray(response.enrichedRoutes)) {
+    response.enrichedRoutes.forEach((entry, i) => {
+      if (entry && entry.title && UNSAFE_INFO_TEXT_PATTERN.test(entry.title)) {
+        errors.push(`unsafe_title_in_enriched_${i}`);
       }
     });
   }
@@ -143,43 +135,15 @@ function validateInstantResponse(response, clientCapabilities) {
     return { valid: false, errors: ['missing_response'] };
   }
 
-  if (!response.nextStepPrediction?.stepId || !response.nextStepPrediction?.targetRoute) {
+  if (!Array.isArray(response.enrichedRoutes) || response.enrichedRoutes.length === 0) {
+    errors.push('missing_enriched_routes');
+  }
+  if (!response.nextStepPrediction?.targetRoute && !response.enrichedRoutes?.length) {
     errors.push('missing_next_step');
   }
-  if (!isAllowedRoute(response.nextStepPrediction?.targetRoute)) {
-    errors.push('invalid_next_step_route');
-  }
-  if (!Array.isArray(response.sectionAdaptations) || response.sectionAdaptations.length === 0) {
-    errors.push('missing_section_adaptations');
-  }
-  if (!Array.isArray(response.shortcuts) || response.shortcuts.length === 0) {
-    errors.push('missing_shortcuts');
-  }
-  if (response.shortcuts.length > clientCapabilities.maxShortcuts) {
-    errors.push('too_many_shortcuts');
-  }
-  if (response.sectionAdaptations.length > clientCapabilities.maxSectionAdaptations) {
-    errors.push('too_many_sections');
-  }
-
-  response.shortcuts.forEach((shortcut) => {
-    if (!isAllowedRoute(shortcut.route)) errors.push('invalid_shortcut_route');
-    if (shortcut.group && !SHORTCUT_GROUPS.includes(shortcut.group)) errors.push('invalid_shortcut_group');
-  });
-  response.sectionAdaptations.forEach((section) => {
-    if (isUnsupportedComponent(section.component, clientCapabilities)) errors.push('unsupported_component');
-    if (isForbiddenComponent(section.component, clientCapabilities)) errors.push('forbidden_component');
-  });
-  if (isUnsupportedComponent(response.focus?.component, clientCapabilities)) {
-    errors.push('unsupported_focus_component');
-  }
-  if (isForbiddenComponent(response.focus?.component, clientCapabilities)) {
-    errors.push('forbidden_focus_component');
-  }
-  if (response.uiTreatment?.showProgressBar !== false) {
+  if ((response.uiTreatment?.showProgressBar ?? false) !== false) {
     errors.push('progress_bar_requested');
   }
-  validateInfoRecommendation(response.infoRecommendation, clientCapabilities).forEach((error) => errors.push(error));
 
   return { valid: errors.length === 0, errors };
 }
@@ -214,44 +178,64 @@ function validateInfoRecommendation(infoRecommendation, clientCapabilities) {
 }
 
 function finalizeValidInstantResponse(response, clientCapabilities, signals) {
-  const infoRecommendation = validateInfoRecommendation(response.infoRecommendation, clientCapabilities || {}).length === 0
-    ? response.infoRecommendation
-    : buildInfoRecommendationFallback({ signals, clientCapabilities });
+  const ranking = Array.isArray(signals?.ranking) ? signals.ranking : [];
+  const stepId = signals?.stepId || response.nextStepPrediction?.stepId || '';
+  const confidence = response.confidence || 0.75;
 
-  if (infoRecommendation && response.nextStepPrediction?.targetRoute) {
-    infoRecommendation.ctaRoute = buildDeduplicatedCtaRoute(
-      response.nextStepPrediction.targetRoute,
-      ALLOWED_INFO_CTA_ROUTES,
-    );
-  }
-
-  const normalizedShortcuts = (response.shortcuts || []).map((sc) => {
-    const description = sc.description || sc.reason || '';
-    return {
-      ...sc,
-      description,
-      group: SHORTCUT_GROUPS.includes(sc.group) ? sc.group : 'contextual',
-      reason: sc.reason || description,
-    };
+  const distributed = distributeFromRanking({
+    ranking,
+    enrichedRoutes: response.enrichedRoutes || [],
+    clientCapabilities,
+    stepId,
+    confidence,
   });
 
-  const deduplicatedShortcuts = deduplicateShortcutRoutes(
-    normalizedShortcuts,
-    response.nextStepPrediction?.targetRoute || '',
-  );
-
   return {
-    ...response,
-    shortcuts: deduplicatedShortcuts,
+    responseVersion: '1.0',
+    dashboard: response.dashboard || null,
+    dashboardId: response.dashboardId || null,
+    cardType: response.cardType || null,
+    confidence,
     mode: ADAPTIVE_MODES.INSTANT,
     source: ADAPTIVE_SOURCES.ADAPTIVE,
     visualPriority: VISUAL_PRIORITIES.MODERATE,
-    rulesApplied: [...new Set([...(response.rulesApplied || []), RULE_IDS.NO_PROGRESS_BAR])],
+    nextStepPrediction: distributed.nextStep,
+    sectionAdaptations: [
+      {
+        sectionId: 'recommended_actions',
+        component: 'NextStepCard',
+        priority: 'high',
+        treatment: 'prominent',
+        title: distributed.nextStep.title,
+        description: distributed.nextStep.description,
+      },
+    ],
+    shortcuts: distributed.shortcuts,
+    focus: {
+      component: 'AdaptiveFocusBanner',
+      message: `Próximo foco: ${distributed.nextStep.title}.`,
+      targetSectionId: 'recommended_actions',
+      priority: 'high',
+    },
+    uiTreatment: {
+      density: 'comfortable',
+      emphasis: 'moderate',
+      animation: 'subtle',
+      explanationVisibility: 'low',
+      showProgressBar: false,
+    },
+    reason: response.reason || distributed.nextStep.description,
+    reasonDetails: response.reasonDetails || {
+      summary: distributed.nextStep.description,
+      details: signals.rulesApplied || [],
+      display: 'info_icon',
+    },
+    rulesApplied: [...new Set([...(response.rulesApplied || []), ...(signals.rulesApplied || []), RULE_IDS.NO_PROGRESS_BAR])],
+    infoRecommendation: distributed.infoRec,
     fallback: {
       used: false,
       reason: null,
     },
-    infoRecommendation,
   };
 }
 

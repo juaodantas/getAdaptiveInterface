@@ -141,7 +141,6 @@ function buildInfoRecommendationFallback({ signals = {}, clientCapabilities = {}
   let base = ruleId ? INFO_BY_RULE[ruleId] : null;
   let template = null;
 
-  // Override based on last agenda interaction context (enriched from frontend)
   const agendaState = operationalContext.agendaState || {};
   if (hasRecentAgendaInteraction(agendaState)) {
     const interactionType = agendaState.lastInteractionType;
@@ -178,7 +177,6 @@ function buildInfoRecommendationFallback({ signals = {}, clientCapabilities = {}
     }
   }
 
-  // After potential context override:
   if (!base) {
     base = {
       type: 'basic_tip',
@@ -219,67 +217,11 @@ function normalizeInfoWithSignal(raw, clientCapabilities, signals, operationalCo
     return normalized;
   }
 
-  // Se o tipo retornado (por Gemini ou outro) difere do esperado pela regra,
-  // rejeita e usa fallback determinístico
   if (normalized.type !== expected.type) {
     return buildInfoRecommendationFallback({ signals, clientCapabilities, operationalContext });
   }
 
   return normalized;
-}
-
-const ALTERNATIVE_CTA_BY_TARGET = {
-  '/protocoloPage': '/lotePage',
-  '/agendaPage': '/relatoriosPage',
-  '/cadernoCampoPage': '/solucaoPage',
-  '/relatoriosPage': '/agendaPage',
-  '/lotePage': '/areaCultivoPage',
-  '/solucaoPage': '/reservatoriosPage',
-  '/gerenciarEquipePage': '/agendaPage',
-  '/areaCultivoPage': '/lotePage',
-  '/reservatoriosPage': '/solucaoPage',
-};
-
-function buildDeduplicatedCtaRoute(primaryRoute, allowedRoutes) {
-  if (typeof primaryRoute !== 'string' || primaryRoute === '') return primaryRoute;
-  const alternative = ALTERNATIVE_CTA_BY_TARGET[primaryRoute];
-  if (alternative && Array.isArray(allowedRoutes) && allowedRoutes.includes(alternative)) {
-    return alternative;
-  }
-  return primaryRoute;
-}
-
-function deduplicateShortcutRoutes(shortcuts, primaryRoute) {
-  if (!Array.isArray(shortcuts) || shortcuts.length === 0) return shortcuts;
-
-  const seenRoutes = new Set();
-  const deduplicated = [];
-  for (const sc of shortcuts) {
-    if (sc && typeof sc.route === 'string' && !seenRoutes.has(sc.route)) {
-      seenRoutes.add(sc.route);
-      deduplicated.push({ ...sc });
-    }
-  }
-
-  const replacementRoute = deduplicated.find((sc) => sc.route !== primaryRoute);
-  if (replacementRoute) {
-    for (let i = 0; i < deduplicated.length; i++) {
-      if (deduplicated[i].route === primaryRoute) {
-        deduplicated[i] = { ...deduplicated[i], route: replacementRoute.route };
-      }
-    }
-  }
-
-  const finalRoutes = new Set();
-  const result = [];
-  for (const sc of deduplicated) {
-    if (!finalRoutes.has(sc.route)) {
-      finalRoutes.add(sc.route);
-      result.push(sc);
-    }
-  }
-
-  return result;
 }
 
 module.exports = {
@@ -288,7 +230,4 @@ module.exports = {
   normalizeInfoRecommendation,
   normalizeInfoWithSignal,
   supportedInfoTypesFromCapabilities,
-  ALTERNATIVE_CTA_BY_TARGET,
-  buildDeduplicatedCtaRoute,
-  deduplicateShortcutRoutes,
 };

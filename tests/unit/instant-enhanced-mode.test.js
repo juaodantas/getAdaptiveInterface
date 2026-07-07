@@ -18,6 +18,15 @@ function validContext(overrides = {}) {
   });
 }
 
+function recordCadernoContext(overrides = {}) {
+  return normalizeOperationalContext({
+    dashboardState: { hasProtocolLinkedToLatestLot: true },
+    agendaState: { hasGeneratedActivities: true, pendingActivitiesTodayCount: 2 },
+    testSequenceSignals: { lotWithProtocolCreated: true, generatedActivitiesSeen: true, adjustmentRecorded: false },
+    ...overrides,
+  });
+}
+
 function validCapabilities(overrides = {}) {
   return normalizeClientCapabilities({
     supportedComponents: ['NextStepCard', 'AdaptiveFocusBanner'],
@@ -27,32 +36,15 @@ function validCapabilities(overrides = {}) {
   });
 }
 
-function validGeminiResponse(overrides = {}) {
+function geminiResponse(overrides = {}) {
   return {
     responseVersion: '1.0',
-    dashboard: 'Tarefas Pendentes',
-    dashboardId: 'TAREFAS_PENDENTES',
-    cardType: 'tarefas',
     confidence: 0.84,
-    nextStepPrediction: {
-      stepId: 'check_generated_agenda_activities',
-      confidence: 0.84,
-      title: 'Verifique as atividades geradas na Agenda',
-      description: 'Há atividades geradas pelo protocolo do lote.',
-      targetRoute: '/agendaPage',
-      actionLabel: 'Abrir Agenda',
-    },
-    sectionAdaptations: [{
-      sectionId: 'recommended_actions',
-      component: 'NextStepCard',
-      priority: 'high',
-      treatment: 'prominent',
-      title: 'Verifique as atividades geradas na Agenda',
-      description: 'Há atividades pendentes criadas pelo protocolo do lote.',
-    }],
-    shortcuts: [{ route: '/agendaPage', confidence: 0.84, label: 'Abrir Agenda', reason: 'Atividades pendentes.' }],
-    focus: { component: 'AdaptiveFocusBanner', message: 'Próximo foco: Agenda.', targetSectionId: 'recommended_actions', priority: 'high' },
-    uiTreatment: { density: 'comfortable', emphasis: 'moderate', animation: 'subtle', explanationVisibility: 'low', showProgressBar: false },
+    enrichedRoutes: [
+      { title: 'Verifique as atividades geradas na Agenda', description: 'Há atividades geradas para conferir.', actionLabel: 'Abrir Agenda', reason: 'Atividades pendentes.' },
+      { title: 'Consulte os lotes', description: 'Veja lotes vinculados.', actionLabel: 'Ver Lotes', reason: null },
+      { title: 'Revise o protocolo', description: 'Confira o protocolo.', actionLabel: 'Abrir Protocolo', reason: null },
+    ],
     reason: 'Contexto operacional indica Agenda.',
     reasonDetails: { summary: 'Contexto operacional indica Agenda.', details: ['lotWithProtocolCreated=true'], display: 'info_icon' },
     rulesApplied: ['RULE-002'],
@@ -79,7 +71,7 @@ describe('Enhanced INSTANT mode contract', () => {
     expect(JSON.stringify(sanitized)).not.toContain('CPF 123');
   });
 
-  test('prompt omits session navigation timestamp with PII', () => {
+  test('prompt contains ranking routes and enrichedRoutes schema, omits PII', () => {
     const prompt = buildInstantPrompt({
       navigationContext: { currentRoute: '/agendaPage', recentRoutes: ['/agendaPage'] },
       sessionNavigations: sanitizeSessionNavigations([
@@ -91,12 +83,14 @@ describe('Enhanced INSTANT mode contract', () => {
     });
 
     expect(prompt).toContain('/agendaPage');
+    expect(prompt).toContain('enrichedRoutes');
+    expect(prompt).toContain('actionLabel');
     expect(prompt).not.toContain('timestamp');
     expect(prompt).not.toContain('Maria');
     expect(prompt).not.toContain('CPF 123');
   });
 
-  test('prompt contains rules, allowed routes, schema, and no PII fields from navigation', () => {
+  test('prompt contains rules, allowed routes, and no PII fields from navigation', () => {
     const prompt = buildInstantPrompt({
       navigationContext: { currentRoute: '/homePage', recentRoutes: ['/agendaPage'] },
       sessionNavigations: sanitizeSessionNavigations([{ route: '/lotePage', resourceName: 'Lote Identificável', resourceType: 'lote' }]),
@@ -108,7 +102,7 @@ describe('Enhanced INSTANT mode contract', () => {
     expect(prompt).toContain('RULE-001');
     expect(prompt).toContain('RULE-010');
     expect(prompt).toContain('/agendaPage');
-    expect(prompt).toContain('nextStepPrediction');
+    expect(prompt).toContain('enrichedRoutes');
     expect(prompt).toContain('Não retorne progress bar, stepper, checklist');
     expect(prompt).not.toContain('resourceName');
     expect(prompt).not.toContain('Lote Identificável');
@@ -173,7 +167,7 @@ describe('Enhanced INSTANT mode contract', () => {
       geminiApiKey: 'fake',
       geminiGenerateText: async ({ prompt }) => {
         capturedPrompt = prompt;
-        return JSON.stringify(validGeminiResponse());
+        return JSON.stringify(geminiResponse());
       },
     });
 
@@ -202,48 +196,33 @@ describe('Enhanced INSTANT mode contract', () => {
     expect(response.reasonDetails.summary).toBe(response.reason);
   });
 
-  test('normalizer parses JSON and validator rejects forbidden components and routes', () => {
+  test('normalizer parses JSON and validator rejects missing enrichedRoutes', () => {
     const capabilities = validCapabilities();
-    const parsed = parseGeminiJson(`\`\`\`json\n${JSON.stringify(validGeminiResponse({
-      nextStepPrediction: { ...validGeminiResponse().nextStepPrediction, targetRoute: '/loginPage' },
-      sectionAdaptations: [{ ...validGeminiResponse().sectionAdaptations[0], component: 'ProgressStepper' }],
-    }))}\n\`\`\``);
-    const normalized = normalizeInstantResponse(parsed, capabilities);
+    const parsed = parseGeminiJson(`\`\`\`json\n${JSON.stringify(geminiResponse({ enrichedRoutes: undefined }))}\n\`\`\``);
+    const normalized = normalizeInstantResponse(parsed, capabilities, deriveInstantSignals(validContext()));
     const validation = validateInstantResponse(normalized, capabilities);
 
     expect(validation.valid).toBe(false);
-    expect(validation.errors).toContain('invalid_next_step_route');
-    expect(validation.errors).toContain('unsupported_component');
-    expect(validation.errors).toContain('forbidden_component');
+    expect(validation.errors).toContain('missing_enriched_routes');
   });
 
-  test('raw validator rejects progress bars and excessive arrays before normalization', async () => {
+  test('raw validator rejects progress bars and forbidden UI equivalents', async () => {
     const capabilities = validCapabilities({ maxShortcuts: 1, maxSectionAdaptations: 1 });
     const response = await buildEnhancedInstantRecommendation({
       data: { operationalContext: validContext(), clientCapabilities: capabilities },
       sessionNavigations: [],
       geminiApiKey: 'fake',
-      geminiGenerateText: async () => JSON.stringify(validGeminiResponse({
-        uiTreatment: { ...validGeminiResponse().uiTreatment, showProgressBar: true },
-        shortcuts: [
-          { route: '/agendaPage', confidence: 0.84, label: 'Abrir Agenda', reason: 'Atividades.' },
-          { route: '/lotePage', confidence: 0.7, label: 'Abrir Lote', reason: 'Lote.' },
-        ],
-        sectionAdaptations: [
-          validGeminiResponse().sectionAdaptations[0],
-          { ...validGeminiResponse().sectionAdaptations[0], sectionId: 'secondary' },
-        ],
+      geminiGenerateText: async () => JSON.stringify(geminiResponse({
+        uiTreatment: { showProgressBar: true },
       })),
     });
 
     expect(response.fallback.used).toBe(true);
     expect(response.fallback.reason).toContain('progress_bar_requested');
-    expect(response.fallback.reason).toContain('too_many_shortcuts');
-    expect(response.fallback.reason).toContain('too_many_sections');
   });
 
-  test('raw validator rejects forbidden UI equivalents outside component and showProgressBar', () => {
-    const validation = validateRawInstantResponse(validGeminiResponse({
+  test('raw validator rejects forbidden UI equivalents in text', () => {
+    const validation = validateRawInstantResponse(geminiResponse({
       reasonDetails: { summary: 'usar checklist operacional', details: ['stepper visual'], display: 'info_icon' },
     }), validCapabilities());
 
@@ -251,66 +230,40 @@ describe('Enhanced INSTANT mode contract', () => {
     expect(validation.errors).toContain('forbidden_ui_equivalent_requested');
   });
 
-  test('validator rejects progress-equivalent components even when client declares support', () => {
-    const capabilities = validCapabilities({
-      supportedComponents: ['NextStepCard', 'AdaptiveFocusBanner', 'ProgressRing', 'CircularProgressIndicator'],
-    });
-
-    const validation = validateRawInstantResponse(validGeminiResponse({
-      sectionAdaptations: [{ ...validGeminiResponse().sectionAdaptations[0], component: 'ProgressRing' }],
-      focus: { ...validGeminiResponse().focus, component: 'CircularProgressIndicator' },
-    }), capabilities);
-
-    expect(validation.valid).toBe(false);
-    expect(validation.errors).toContain('forbidden_component');
-    expect(validation.errors).toContain('forbidden_focus_component');
-    expect(validation.errors).not.toContain('unsupported_component');
-    expect(validation.errors).not.toContain('unsupported_focus_component');
-  });
-
-  test('progress-equivalent component from Gemini generates fallback', async () => {
-    const response = await buildEnhancedInstantRecommendation({
-      data: {
-        operationalContext: validContext(),
-        clientCapabilities: validCapabilities({ supportedComponents: ['NextStepCard', 'AdaptiveFocusBanner', 'ProgressRing'] }),
-      },
-      sessionNavigations: [],
-      geminiApiKey: 'fake',
-      geminiGenerateText: async () => JSON.stringify(validGeminiResponse({
-        sectionAdaptations: [{ ...validGeminiResponse().sectionAdaptations[0], component: 'ProgressRing' }],
-      })),
-    });
-
-    expect(response.fallback.used).toBe(true);
-    expect(response.fallback.reason).toContain('forbidden_component');
-  });
-
   test('raw validator rejects unsupported focus component', () => {
-    const validation = validateRawInstantResponse(validGeminiResponse({
+    const parsed = parseGeminiJson(JSON.stringify(geminiResponse()));
+    const validation = validateRawInstantResponse({
+      ...parsed,
       focus: { component: 'UnsupportedBanner', message: 'Foco', targetSectionId: 'recommended_actions', priority: 'high' },
-    }), validCapabilities());
+    }, validCapabilities());
 
     expect(validation.valid).toBe(false);
     expect(validation.errors).toContain('unsupported_focus_component');
   });
 
-  test('valid Gemini response becomes adaptive moderate recommendation preserving legacy fields', async () => {
+  test('valid Gemini response becomes adaptive moderate recommendation with unique routes', async () => {
+    const ctx = recordCadernoContext();
     const response = await buildEnhancedInstantRecommendation({
-      data: { operationalContext: validContext(), clientCapabilities: validCapabilities() },
+      data: { operationalContext: ctx, clientCapabilities: validCapabilities() },
       sessionNavigations: [],
       geminiApiKey: 'fake',
-      geminiGenerateText: async () => JSON.stringify(validGeminiResponse()),
+      geminiGenerateText: async () => JSON.stringify(geminiResponse({
+        enrichedRoutes: [
+          { title: 'Registre o ajuste', description: 'Ajuste pendente', actionLabel: 'Abrir Caderno', reason: 'Ajuste.' },
+          { title: 'Ver solução', description: 'Solução disponível', actionLabel: 'Ver Solução', reason: null },
+          { title: 'Consultar agenda', description: 'Atividades', actionLabel: 'Abrir Agenda', reason: null },
+        ],
+      })),
     });
 
     expect(response.mode).toBe('INSTANT');
     expect(response.source).toBe('adaptive');
     expect(response.visualPriority).toBe('moderate');
     expect(response.fallback.used).toBe(false);
-    expect(response.dashboardId).toBe('TAREFAS_PENDENTES');
-    expect(response.shortcuts).toHaveLength(1);
+
+    const routes = [response.nextStepPrediction.targetRoute, response.infoRecommendation.ctaRoute, ...response.shortcuts.map((s) => s.route)];
+    expect(new Set(routes).size).toBe(routes.length);
     expect(typeof response.reason).toBe('string');
-    expect(response.reason).toContain('Contexto operacional');
-    expect(response.reasonDetails.summary).toContain('Contexto operacional');
   });
 
   test('invalid Gemini JSON falls back deterministically', async () => {
@@ -327,8 +280,14 @@ describe('Enhanced INSTANT mode contract', () => {
   });
 
   test('finalizer marks valid recommendations as moderate and non-fallback', () => {
-    const normalized = normalizeInstantResponse(validGeminiResponse(), validCapabilities());
-    const finalized = finalizeValidInstantResponse(normalized);
+    const signals = deriveInstantSignals(recordCadernoContext());
+    const normalized = normalizeInstantResponse(geminiResponse({
+      enrichedRoutes: [
+        { title: 'Registre', description: 'Ajuste', actionLabel: 'Abrir', reason: null },
+        { title: 'Solução', description: 'Solução', actionLabel: 'Ver', reason: null },
+      ],
+    }), validCapabilities(), signals);
+    const finalized = finalizeValidInstantResponse(normalized, validCapabilities(), signals);
 
     expect(finalized.visualPriority).toBe('moderate');
     expect(finalized.fallback.used).toBe(false);
