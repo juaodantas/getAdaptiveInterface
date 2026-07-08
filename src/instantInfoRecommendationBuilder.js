@@ -6,6 +6,7 @@ const {
   INFO_RECOMMENDATION_TYPES,
 } = require('./adaptiveContract');
 const { RULE_IDS, ROUTE_CONFLICT_RESOLVER } = require('./instantDomainRules');
+const { ROUTE_DEFAULT_LABELS } = require('./instantRouteDistributor');
 
 const FALLBACK_TYPE_ORDER = ['basic_tip', 'day_progress', 'today_cultivation', 'field_notes_summary', 'reservoir_report'];
 const SAFE_TEXT_PATTERN = /(?:\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b|@|https?:\/\/|resourceName|cpf|cnpj)/i;
@@ -239,6 +240,20 @@ function normalizeInfoWithSignal(raw, clientCapabilities, signals, operationalCo
   return normalized;
 }
 
+function remapShortcutRoute(shortcut, route) {
+  const defaults = ROUTE_DEFAULT_LABELS[route] || { title: route, description: '', actionLabel: 'Abrir' };
+  const label = defaults.actionLabel || defaults.title || 'Abrir';
+  const description = defaults.description || '';
+
+  return {
+    ...shortcut,
+    route,
+    label,
+    description,
+    reason: description || label,
+  };
+}
+
 function resolveRouteConflicts(stepId, nextStepRoute, infoCtaRoute, shortcuts) {
   const resolver = ROUTE_CONFLICT_RESOLVER[stepId];
   if (!resolver) return { nextStepRoute, infoCtaRoute, shortcuts };
@@ -259,7 +274,7 @@ function resolveRouteConflicts(stepId, nextStepRoute, infoCtaRoute, shortcuts) {
     const alternative = resolver[sc.route] || null;
     if (alternative && !usedRoutes.has(alternative)) {
       usedRoutes.add(alternative);
-      return { ...sc, route: alternative };
+      return remapShortcutRoute(sc, alternative);
     }
     return null;
   }).filter(Boolean);

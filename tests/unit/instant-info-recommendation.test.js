@@ -205,6 +205,46 @@ describe('INSTANT route recommendation', () => {
     expect(resolved.infoCtaRoute).toBe('/relatoriosPage');
   });
 
+  test('resolveRouteConflicts updates shortcut text when route is remapped', () => {
+    const resolved = resolveRouteConflicts('test_complete', '/relatoriosPage', '/agendaPage', [
+      {
+        route: '/agendaPage',
+        label: 'Agenda',
+        description: 'Acesse o histórico de atividades',
+        reason: 'Acesse o histórico de atividades',
+        confidence: 0.5,
+        group: 'secondary',
+      },
+    ]);
+
+    expect(resolved.shortcuts).toHaveLength(1);
+    expect(resolved.shortcuts[0]).toMatchObject({
+      route: '/protocoloPage',
+      label: 'Abrir Protocolos',
+      description: 'Cadastre e gerencie protocolos.',
+      reason: 'Cadastre e gerencie protocolos.',
+      confidence: 0.5,
+      group: 'secondary',
+    });
+    expect(resolved.shortcuts[0].label).not.toContain('Agenda');
+    expect(resolved.shortcuts[0].description).not.toContain('histórico');
+    expect(resolved.shortcuts[0].reason).not.toContain('histórico');
+  });
+
+  test('resolveRouteConflicts preserves shortcut text when route does not change', () => {
+    const shortcut = {
+      route: '/protocoloPage',
+      label: 'Texto atual',
+      description: 'Descrição atual',
+      reason: 'Motivo atual',
+      confidence: 0.5,
+      group: 'contextual',
+    };
+    const resolved = resolveRouteConflicts('test_complete', '/relatoriosPage', '/agendaPage', [shortcut]);
+
+    expect(resolved.shortcuts).toEqual([shortcut]);
+  });
+
   test('fallback response has unique routes and max 3 shortcuts', () => {
     const fallback = buildEnhancedInstantFallback({ operationalContext: cadernoContext(), clientCapabilities: capabilities() });
 
