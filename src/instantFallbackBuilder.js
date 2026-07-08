@@ -49,6 +49,36 @@ const STEP_COPY = {
     description: 'Existem atividades atrasadas e a Agenda deve ser priorizada.',
     actionLabel: 'Abrir Agenda',
   },
+  review_today_tasks: {
+    title: 'Priorize as atividades de hoje',
+    description: 'Há tarefas de hoje ou uma próxima atividade pendente para acompanhar na Agenda.',
+    actionLabel: 'Abrir Agenda',
+  },
+  review_protocol_tasks: {
+    title: 'Confira tarefas geradas por protocolo',
+    description: 'Há sinais de protocolo vinculado e atividades operacionais para revisar.',
+    actionLabel: 'Abrir Agenda',
+  },
+  review_field_notes: {
+    title: 'Confira registros recentes do Caderno',
+    description: 'Há anotações recentes de campo que podem orientar o próximo passo operacional.',
+    actionLabel: 'Abrir Caderno',
+  },
+  review_reservoirs: {
+    title: 'Revise reservatórios e solução',
+    description: 'Há sinais de reservatório ou solução nutritiva para acompanhar.',
+    actionLabel: 'Abrir Reservatórios',
+  },
+  review_production: {
+    title: 'Veja o resumo de produção',
+    description: 'Há dados de produção ou cultivo para revisar no resumo operacional.',
+    actionLabel: 'Ver Relatórios',
+  },
+  review_team: {
+    title: 'Revise a saúde da equipe',
+    description: 'Há sinais operacionais de equipe para acompanhar.',
+    actionLabel: 'Abrir Equipe',
+  },
 };
 
 function buildEnhancedInstantFallback({ operationalContext, clientCapabilities, reason = 'deterministic_fallback' }) {
@@ -58,7 +88,7 @@ function buildEnhancedInstantFallback({ operationalContext, clientCapabilities, 
   const confidence = reason === 'gemini_invalid_response' ? 0.68 : 0.64;
 
   const infoRec = buildInfoRecommendationFallback({ signals, clientCapabilities: clientCapabilities || {}, operationalContext });
-  const maxShortcuts = Math.min((clientCapabilities && clientCapabilities.maxShortcuts) || 3, 3);
+  const maxShortcuts = Math.max(1, (clientCapabilities && clientCapabilities.maxShortcuts) || 3);
 
   const rawShortcuts = (signals.shortcuts || []).slice(0, maxShortcuts).map((sc, index) => ({
     route: sc.route,

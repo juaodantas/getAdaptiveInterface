@@ -50,7 +50,7 @@ function normalizeInstantResponse(raw, clientCapabilities, signals, operationalC
 
   const dashboardFields = normalizeDashboardFields(raw);
   const confidence = clampConfidence(raw.confidence);
-  const maxShortcuts = Math.min(clientCapabilities.maxShortcuts || 3, 3);
+  const maxShortcuts = Math.max(1, clientCapabilities.maxShortcuts || 3);
 
   const shortcuts = Array.isArray(raw.shortcuts)
     ? raw.shortcuts.slice(0, maxShortcuts).map((shortcut) => ({

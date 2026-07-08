@@ -219,7 +219,7 @@ function finalizeValidInstantResponse(response, clientCapabilities, signals) {
     ? response.infoRecommendation
     : buildInfoRecommendationFallback({ signals, clientCapabilities });
 
-  const maxShortcuts = Math.min(clientCapabilities.maxShortcuts || 3, 3);
+  const maxShortcuts = Math.max(1, clientCapabilities.maxShortcuts || 3);
   const normalizedShortcuts = (response.shortcuts || []).slice(0, maxShortcuts).map((sc) => {
     const description = sc.description || sc.reason || '';
     return {

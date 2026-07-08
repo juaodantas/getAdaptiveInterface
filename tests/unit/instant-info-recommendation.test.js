@@ -1,4 +1,4 @@
-const { buildInstantPrompt } = require('../../src/instantPromptBuilder');
+const { buildInstantPrompt, buildPromptOperationalContext } = require('../../src/instantPromptBuilder');
 const { normalizeClientCapabilities } = require('../../src/clientCapabilitiesValidator');
 const { normalizeOperationalContext } = require('../../src/operationalContextValidator');
 const { deriveInstantSignals, ROUTE_CONFLICT_RESOLVER, STEP_SHORTCUTS } = require('../../src/instantDomainRules');
@@ -107,12 +107,12 @@ describe('INSTANT route recommendation', () => {
 
     expect(normalized).not.toBeNull();
     expect(normalized.nextStepPrediction.targetRoute).toBe('/cadernoCampoPage');
-    expect(normalized.infoRecommendation.ctaRoute).toBe('/relatoriosPage');
+    expect(normalized.infoRecommendation.ctaRoute).toBe('/agendaPage');
     expect(normalized.shortcuts.length).toBeLessThanOrEqual(3);
     expect(normalized.confidence).toBe(0.84);
   });
 
-  test('normalizer caps shortcuts at 3', () => {
+  test('normalizer respects client maxShortcuts up to 4', () => {
     const signals = deriveInstantSignals(cadernoContext());
     const manyShortcuts = geminiResponse({
       shortcuts: [
@@ -123,8 +123,65 @@ describe('INSTANT route recommendation', () => {
         { route: '/e', label: 'E' },
       ],
     });
-    const normalized = normalizeInstantResponse(manyShortcuts, capabilities(), signals, cadernoContext());
-    expect(normalized.shortcuts.length).toBeLessThanOrEqual(3);
+    const normalized = normalizeInstantResponse(manyShortcuts, capabilities({ maxShortcuts: 4 }), signals, cadernoContext());
+    expect(normalized.shortcuts.length).toBe(4);
+  });
+
+  test('validator preserves enriched operational context contract fields', () => {
+    const normalized = normalizeOperationalContext({
+      generatedAt: '2026-07-07T12:34:56.000Z',
+      unknownSection: { leaked: true },
+      dashboardState: { totalLots: 4, speciesInProgress: ['Alface', '  Rúcula  '] },
+      agendaState: {
+        pendingActivitiesWeekCount: 5,
+        lastInteractionType: 'completed',
+        lastActivityTitle: ' Aplicação de nutrientes ',
+        lastActivityDescription: ' Ajuste concluído no lote ',
+        nextActivity: { title: 'Irrigação', description: 'Verificar linhas', type: 'irrigation', status: 'pending', dueLabel: 'hoje' },
+      },
+      productionState: { hasProductionData: true, upcomingHarvestLots: 2 },
+      cultivationState: { dominantCulture: 'Alface', cultures: [{ name: 'Alface', quantity: 2, color: '#fff' }] },
+      teamState: { activeMembers: 3, averageCompletionRate: 83 },
+      alertState: { hasCriticalAlerts: true, items: [{ type: 'critical', message: 'Atenção ao lote', severity: 'critical', date: '2026-07-07T12:34:56Z' }] },
+      reservoirState: { hasReservoirs: true, withSolutionCount: 1 },
+      fieldNotebookState: { hasRecentFieldNotes: true, latestNotes: [{ title: 'Semeadura', createdAt: '2026-07-07T12:34:56Z' }] },
+      infoCardsState: { dayProgress: { total: 4, completed: 2, label: 'Metade do dia' } },
+      testSequenceSignals: { adjustmentRecorded: true, changedAt: '2026-07-07T12:34:56Z' },
+    });
+
+    expect(normalized.generatedAt).toBe('2026-07-07T12:34:56.000Z');
+    expect(normalized.unknownSection).toBeUndefined();
+    expect(normalized.agendaState.lastInteractionType).toBe('completed');
+    expect(normalized.agendaState.lastActivityTitle).toBe('Aplicação de nutrientes');
+    expect(normalized.agendaState.nextActivity.title).toBe('Irrigação');
+    expect(normalized.agendaState.nextActivity.description).toBe('Verificar linhas');
+    expect(normalized.testSequenceSignals.adjustmentRecorded).toBe(true);
+    expect(normalized.infoCardsState.dayProgress.label).toBe('Metade do dia');
+  });
+
+  test('compact prompt context summarizes enriched arrays', () => {
+    const normalized = normalizeOperationalContext({
+      dashboardState: { speciesInProgress: ['Alface', 'Rúcula'] },
+      agendaState: { latestTasks: [{ title: 'Tarefa 1' }], nextActivity: { title: 'Irrigação', description: 'Verificar linhas' } },
+      productionState: { monthlyProduction: [{ month: 'Julho', quantity: 10 }] },
+      reservoirState: { highlightedReservoirs: [{ name: 'Reservatório A' }] },
+      fieldNotebookState: { latestNotes: [{ title: 'Nota do campo' }] },
+      infoCardsState: {
+        todayCultivation: { nextTasks: [{ title: 'Tarefa sensível' }], activeLots: 2 },
+        fieldNotesSummary: { latestNotes: [{ title: 'Nota sensível' }], totalRecentNotes: 1 },
+      },
+    });
+
+    const compact = buildPromptOperationalContext(normalized);
+
+    expect(compact.dashboardState.speciesInProgressCount).toBe(2);
+    expect(compact.productionState.monthlyProductionCount).toBe(1);
+    expect(compact.reservoirState.highlightedReservoirsCount).toBe(1);
+    expect(compact.fieldNotebookState.latestNotesCount).toBe(1);
+    expect(compact.infoCardsState.todayCultivation.nextTasksCount).toBe(1);
+    expect(compact.infoCardsState.todayCultivation.nextTasks).toBeUndefined();
+    expect(compact.infoCardsState.fieldNotesSummary.latestNotesCount).toBe(1);
+    expect(compact.infoCardsState.fieldNotesSummary.latestNotes).toBeUndefined();
   });
 
   test('resolveRouteConflicts ensures unique routes', () => {

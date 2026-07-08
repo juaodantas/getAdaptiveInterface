@@ -58,6 +58,21 @@ const INFO_BY_RULE = {
   [RULE_IDS.CRITICAL_ALERTS]: {
     type: 'basic_tip', category: 'agenda', source: 'fallback', priority: 'high', ctaRoute: '/agendaPage',
   },
+  [RULE_IDS.TODAY_TASKS]: {
+    type: 'today_cultivation', category: 'agenda', source: 'isis', priority: 'high', ctaRoute: '/agendaPage',
+  },
+  [RULE_IDS.FIELD_NOTEBOOK]: {
+    type: 'field_notes_summary', category: 'caderno_campo', source: 'isis', priority: 'medium', ctaRoute: '/cadernoCampoPage',
+  },
+  [RULE_IDS.RESERVOIR_ATTENTION]: {
+    type: 'reservoir_report', category: 'reservatorio', source: 'isis', priority: 'medium', ctaRoute: '/reservatoriosPage',
+  },
+  [RULE_IDS.PRODUCTION_CONTEXT]: {
+    type: 'today_cultivation', category: 'cultivo', source: 'isis', priority: 'medium', ctaRoute: '/relatoriosPage',
+  },
+  [RULE_IDS.TEAM_CONTEXT]: {
+    type: 'day_progress', category: 'agenda', source: 'local_tip', priority: 'low', ctaRoute: '/agendaPage',
+  },
 };
 
 function supportedInfoTypesFromCapabilities(clientCapabilities = {}) {
@@ -235,7 +250,7 @@ function resolveRouteConflicts(stepId, nextStepRoute, infoCtaRoute, shortcuts) {
   if (resolvedInfoCta) usedRoutes.add(resolvedInfoCta);
   if (nextStepRoute) usedRoutes.add(nextStepRoute);
 
-  const resolvedShortcuts = (shortcuts || []).slice(0, 3).map((sc) => {
+  const resolvedShortcuts = (shortcuts || []).map((sc) => {
     if (!sc || !sc.route) return sc;
     if (!usedRoutes.has(sc.route)) {
       usedRoutes.add(sc.route);
