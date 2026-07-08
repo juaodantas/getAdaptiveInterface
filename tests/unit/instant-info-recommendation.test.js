@@ -107,7 +107,7 @@ describe('INSTANT route recommendation', () => {
 
     expect(normalized).not.toBeNull();
     expect(normalized.nextStepPrediction.targetRoute).toBe('/cadernoCampoPage');
-    expect(normalized.infoRecommendation.ctaRoute).toBe('/agendaPage');
+    expect(normalized.infoRecommendation.ctaRoute).toBe('/relatoriosPage');
     expect(normalized.shortcuts.length).toBeLessThanOrEqual(3);
     expect(normalized.confidence).toBe(0.84);
   });

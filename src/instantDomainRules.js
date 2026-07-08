@@ -198,6 +198,14 @@ function deriveInstantSignals(context) {
     || infoCards.todayCultivation?.activeLots > 0;
   const hasTeamSignal = team.activeMembers > 0 || team.overdueActivities > 0 || team.onTimeActivities > 0;
 
+  // Sinal derivado: lote com protocolo ativo + atividades vistas + sem registro no caderno.
+  // Indica que o usuário precisa registrar o trabalho de campo associado ao lote.
+  const needsFieldNote =
+    effective.lotWithProtocolCreated
+    && effective.generatedActivitiesSeen
+    && !notebook.hasRecentFieldNotes
+    && !notebook.hasRecentNutritionAdjustmentRecord;
+
   // Priority 1: Critical alerts override sequence
   if (alerts.hasCriticalAlerts || alerts.criticalCount > 0) {
     rulesApplied.push(RULE_IDS.CRITICAL_ALERTS);
@@ -208,6 +216,16 @@ function deriveInstantSignals(context) {
   if (agenda.overdueActivitiesCount > 0 || agenda.dueBuckets?.overdue > 0 || agenda.nextActivity?.overdue === true) {
     rulesApplied.push(RULE_IDS.OVERDUE_TASKS);
     return { stepId: 'resolve_overdue_tasks', targetRoute: '/agendaPage', dashboardId: 'TAREFAS_PENDENTES', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.resolve_overdue_tasks, 0.85) };
+  }
+
+  // Priority 2.5: Lote com protocolo precisa de registro em caderno de campo.
+  // Elevado de priority 7 para capturar o caso em que o usuário criou lote com protocolo,
+  // viu as atividades geradas, mas ainda não registrou trabalho de campo — situação comum
+  // em que antes só aparecia Agenda (today tasks). Agora Caderno de Campo aparece como
+  // recomendação prioritária quando há contexto de lote ativo.
+  if (needsFieldNote) {
+    rulesApplied.push(RULE_IDS.FIELD_NOTEBOOK);
+    return { stepId: 'review_field_notes', targetRoute: '/cadernoCampoPage', dashboardId: 'TAREFAS_PENDENTES', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.review_field_notes, 0.8) };
   }
 
   // Priority 3: Today tasks / next task

@@ -176,7 +176,7 @@ describe('Enhanced INSTANT mode contract', () => {
     expect(response.mode).toBe('INSTANT');
     expect(response.visualPriority).toBe('moderate');
     expect(response.fallback).toEqual({ used: true, reason: 'test' });
-    expect(response.nextStepPrediction.targetRoute).toBe('/agendaPage');
+    expect(response.nextStepPrediction.targetRoute).toBe('/cadernoCampoPage');
     expect(response.sectionAdaptations[0].component).toBe('NextStepCard');
     expect(response.uiTreatment.showProgressBar).toBe(false);
     expect(response.shortcuts.length).toBeLessThanOrEqual(3);
@@ -248,7 +248,7 @@ describe('Enhanced INSTANT mode contract', () => {
 
     expect(response.fallback.used).toBe(true);
     expect(response.source).toBe('fallback');
-    expect(response.nextStepPrediction.targetRoute).toBe('/agendaPage');
+    expect(response.nextStepPrediction.targetRoute).toBe('/cadernoCampoPage');
   });
 
   test('finalizer applies conflict resolution and marks non-fallback', () => {
