@@ -8,6 +8,7 @@ const requiredVars = [
   'BIGQUERY_ANALYTICS_DATASET',
   'GEMINI_API_KEY',
   'ADMIN_KEY',
+  'ISIS_JWT_SECRET',
 ];
 
 const missing = requiredVars.filter(varName => !process.env[varName]);
@@ -24,4 +25,5 @@ console.log(`   - BIGQUERY_ANALYTICS_DATASET: ${process.env.BIGQUERY_ANALYTICS_D
 console.log(`   - GEMINI_API_KEY: ${process.env.GEMINI_API_KEY ? '✅ configurada' : '❌ ausente'}`);
 console.log(`   - SCHEDULER_SECRET: ${process.env.SCHEDULER_SECRET ? '✅ configurada' : '❌ ausente'}`);
 console.log(`   - ADMIN_KEY: ${process.env.ADMIN_KEY ? '✅ configurada' : '❌ ausente'}`);
+console.log(`   - ISIS_JWT_SECRET: ${process.env.ISIS_JWT_SECRET ? '✅ configurada' : '❌ ausente'}`);
 process.exit(0);

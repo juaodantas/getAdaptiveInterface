@@ -53,6 +53,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           SCHEDULER_SECRET: ${{ secrets.SCHEDULER_SECRET }}
           ADMIN_KEY: ${{ secrets.ADMIN_KEY }}
+          ISIS_JWT_SECRET: ${{ secrets.ISIS_JWT_SECRET }}
 
       - name: Create .env for Cloud Function runtime
         run: |
@@ -61,6 +62,7 @@ jobs:
           echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" >> .env
           echo "SCHEDULER_SECRET=${{ secrets.SCHEDULER_SECRET }}" >> .env
           echo "ADMIN_KEY=${{ secrets.ADMIN_KEY }}" >> .env
+          echo "ISIS_JWT_SECRET=${{ secrets.ISIS_JWT_SECRET }}" >> .env
 
       - name: Deploy to Firebase
         run: npx firebase-tools deploy --only functions --project ${{ secrets.FIREBASE_PROJECT_ID }} --token ${{ secrets.FIREBASE_TOKEN }} --non-interactive
@@ -70,3 +72,4 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           SCHEDULER_SECRET: ${{ secrets.SCHEDULER_SECRET }}
           ADMIN_KEY: ${{ secrets.ADMIN_KEY }}
+          ISIS_JWT_SECRET: ${{ secrets.ISIS_JWT_SECRET }}
