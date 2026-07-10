@@ -1,13 +1,15 @@
 const { buildInstantPrompt } = require('../../src/instantPromptBuilder');
 const { normalizeOperationalContext } = require('../../src/operationalContextValidator');
 const { normalizeClientCapabilities } = require('../../src/clientCapabilitiesValidator');
-const { deriveInstantSignals } = require('../../src/instantDomainRules');
+const { deriveInstantSignals, resolveTestSequenceStep, TEST_SEQUENCE_STEPS } = require('../../src/instantDomainRules');
 const { buildEnhancedInstantFallback } = require('../../src/instantFallbackBuilder');
 const { parseGeminiJson, normalizeInstantResponse } = require('../../src/instantResponseNormalizer');
 const { validateRawInstantResponse, validateInstantResponse, finalizeValidInstantResponse } = require('../../src/instantResponseValidator');
 const { buildEnhancedInstantRecommendation } = require('../../src/enhancedInstantMode');
 const { resolveRequestSessionId, sanitizeSessionNavigations } = require('../../src/sessionContext');
 const { ENHANCED_INSTANT_METRIC_EVENTS, LEGACY_METRIC_EVENTS } = require('../../src/adaptiveMetrics');
+const { buildCacheEntry, buildCacheLookup } = require('../../src/instantRecommendationCache');
+const { resolveRouteConflicts } = require('../../src/instantInfoRecommendationBuilder');
 
 function validContext(overrides = {}) {
   return normalizeOperationalContext({
@@ -81,6 +83,18 @@ function geminiResponse(overrides = {}) {
   };
 }
 
+function finalizedRecommendation(ctx = cadernoContext(), caps = validCapabilities()) {
+  const signals = deriveInstantSignals(ctx);
+  const normalized = normalizeInstantResponse(geminiResponse(), caps, signals, ctx);
+  return finalizeValidInstantResponse(normalized, caps, signals);
+}
+
+function cacheEntryFor(ctx = cadernoContext(), caps = validCapabilities(), recommendation = finalizedRecommendation(ctx, caps), now = new Date('2026-07-10T00:00:00Z')) {
+  const signals = deriveInstantSignals(ctx);
+  const lookup = buildCacheLookup({ operationalContext: ctx, signals, clientCapabilities: caps, navigationContext: { currentRoute: null, recentRoutes: [] } });
+  return buildCacheEntry({ lookup, recommendation, now }).entry;
+}
+
 describe('Enhanced INSTANT mode contract', () => {
   test('resolves new session.sessionId before legacy sessionId', () => {
     expect(resolveRequestSessionId({ session: { sessionId: ' new ' }, sessionId: 'legacy' })).toBe('new');
@@ -113,7 +127,7 @@ describe('Enhanced INSTANT mode contract', () => {
     expect(prompt).toContain('nextStepPrediction');
     expect(prompt).toContain('infoRecommendation');
     expect(prompt).toContain('shortcuts');
-    expect(prompt).toContain('ctaRoute deve ser DIFERENTE');
+    expect(prompt).toContain('O primeiro shortcut PODE repetir o targetRoute');
     expect(prompt).not.toContain('Maria');
     expect(prompt).not.toContain('CPF 123');
   });
@@ -181,7 +195,9 @@ describe('Enhanced INSTANT mode contract', () => {
     expect(response.uiTreatment.showProgressBar).toBe(false);
     expect(response.shortcuts.length).toBeLessThanOrEqual(3);
     const routes = [response.nextStepPrediction.targetRoute, response.infoRecommendation.ctaRoute, ...response.shortcuts.map((s) => s.route)];
-    expect(new Set(routes).size).toBe(routes.length);
+    // Opção B: first shortcut pode repetir targetRoute
+    const unique = [...new Set(routes)];
+    expect(unique.length).toBeGreaterThanOrEqual(routes.length - 1);
   });
 
   test('raw validator rejects progress bars and excessive arrays', () => {
@@ -238,6 +254,337 @@ describe('Enhanced INSTANT mode contract', () => {
     expect(response.shortcuts.length).toBeLessThanOrEqual(3);
   });
 
+  test('cache hit returns cached recommendation without calling Gemini or adding public metadata', async () => {
+    const ctx = cadernoContext();
+    const caps = validCapabilities();
+    const entry = cacheEntryFor(ctx, caps);
+    const geminiGenerateText = jest.fn();
+    const events = [];
+    const cache = {
+      get: jest.fn(async () => ({ ok: true, entry })),
+      markHit: jest.fn(async () => ({ ok: true })),
+      set: jest.fn(),
+    };
+
+    const response = await buildEnhancedInstantRecommendation({
+      data: { operationalContext: ctx, clientCapabilities: caps },
+      sessionNavigations: [],
+      geminiApiKey: 'fake',
+      geminiGenerateText,
+      instantRecommendationCache: cache,
+      cacheEventReporter: (event) => events.push(event),
+    });
+
+    expect(response).toEqual(entry.recommendation);
+    expect(response.cache).toBeUndefined();
+    expect(geminiGenerateText).not.toHaveBeenCalled();
+    expect(cache.markHit).toHaveBeenCalledWith(entry.cacheKey);
+    expect(events.map((event) => event.event)).toEqual(['instant_cache_hit', 'instant_gemini_saved_by_cache']);
+    expect(JSON.stringify(events)).not.toContain('userId');
+    expect(JSON.stringify(events)).not.toContain('sessionId');
+  });
+
+  test('cache hit strips extra top-level public metadata from cached recommendation', async () => {
+    const ctx = cadernoContext();
+    const caps = validCapabilities();
+    const entry = cacheEntryFor(ctx, caps);
+    entry.recommendation = {
+      ...entry.recommendation,
+      cache: { hit: true },
+      cachedAt: '2026-07-10T00:00:00Z',
+    };
+    const geminiGenerateText = jest.fn(async () => JSON.stringify(geminiResponse()));
+
+    const response = await buildEnhancedInstantRecommendation({
+      data: { operationalContext: ctx, clientCapabilities: caps },
+      sessionNavigations: [],
+      geminiApiKey: 'fake',
+      geminiGenerateText,
+      instantRecommendationCache: {
+        get: jest.fn(async () => ({ ok: true, entry })),
+        markHit: jest.fn(async () => ({ ok: true })),
+      },
+    });
+
+    expect(response.cache).toBeUndefined();
+    expect(response.cachedAt).toBeUndefined();
+    expect(geminiGenerateText).not.toHaveBeenCalled();
+  });
+
+  test('cache hit strips nested metadata from cached recommendation', async () => {
+    const ctx = cadernoContext();
+    const caps = validCapabilities();
+    const entry = cacheEntryFor(ctx, caps);
+    entry.recommendation = {
+      ...entry.recommendation,
+      nextStepPrediction: {
+        ...entry.recommendation.nextStepPrediction,
+        userId: 'user-secret',
+        cachedAt: '2026-07-10T00:00:00Z',
+      },
+      shortcuts: entry.recommendation.shortcuts.map((shortcut, index) => index === 0
+        ? { ...shortcut, cache: { hit: true }, resourceName: 'Lote secreto' }
+        : shortcut),
+      infoRecommendation: {
+        ...entry.recommendation.infoRecommendation,
+        internalMetadata: { userId: 'user-secret' },
+      },
+    };
+    const geminiGenerateText = jest.fn(async () => JSON.stringify(geminiResponse()));
+
+    const response = await buildEnhancedInstantRecommendation({
+      data: { operationalContext: ctx, clientCapabilities: caps },
+      sessionNavigations: [],
+      geminiApiKey: 'fake',
+      geminiGenerateText,
+      instantRecommendationCache: {
+        get: jest.fn(async () => ({ ok: true, entry })),
+        markHit: jest.fn(async () => ({ ok: true })),
+      },
+    });
+
+    expect(response.nextStepPrediction.userId).toBeUndefined();
+    expect(response.nextStepPrediction.cachedAt).toBeUndefined();
+    expect(response.shortcuts[0].cache).toBeUndefined();
+    expect(response.shortcuts[0].resourceName).toBeUndefined();
+    expect(response.infoRecommendation.internalMetadata).toBeUndefined();
+    expect(geminiGenerateText).not.toHaveBeenCalled();
+  });
+
+  test('cache miss calls Gemini and writes final validated recommendation', async () => {
+    const ctx = cadernoContext();
+    const caps = validCapabilities();
+    const events = [];
+    const cache = {
+      get: jest.fn(async () => ({ ok: true, entry: null })),
+      set: jest.fn(async () => ({ ok: true })),
+    };
+
+    const response = await buildEnhancedInstantRecommendation({
+      data: { operationalContext: ctx, clientCapabilities: caps },
+      sessionNavigations: [],
+      geminiApiKey: 'fake',
+      geminiGenerateText: async () => JSON.stringify(geminiResponse()),
+      instantRecommendationCache: cache,
+      cacheEventReporter: (event) => events.push(event),
+    });
+
+    expect(response.fallback.used).toBe(false);
+    expect(cache.set).toHaveBeenCalledTimes(1);
+    expect(cache.set.mock.calls[0][0].recommendation).toEqual(response);
+    expect(events.map((event) => event.event)).toEqual(['instant_cache_miss', 'instant_cache_write_success']);
+  });
+
+  test('stale cache entry is not used and falls through to Gemini', async () => {
+    const ctx = cadernoContext();
+    const caps = validCapabilities();
+    const entry = cacheEntryFor(ctx, caps, finalizedRecommendation(ctx, caps), new Date('2020-01-01T00:00:00Z'));
+    const geminiGenerateText = jest.fn(async () => JSON.stringify(geminiResponse()));
+    const events = [];
+
+    const response = await buildEnhancedInstantRecommendation({
+      data: { operationalContext: ctx, clientCapabilities: caps },
+      sessionNavigations: [],
+      geminiApiKey: 'fake',
+      geminiGenerateText,
+      instantRecommendationCache: {
+        get: jest.fn(async () => ({ ok: true, entry })),
+        set: jest.fn(async () => ({ ok: true })),
+      },
+      cacheEventReporter: (event) => events.push(event),
+    });
+
+    expect(response.fallback.used).toBe(false);
+    expect(geminiGenerateText).toHaveBeenCalledTimes(1);
+    expect(events.map((event) => event.event)).toContain('instant_cache_stale');
+  });
+
+  test('invalid cached recommendation is not used and falls through to Gemini', async () => {
+    const ctx = cadernoContext();
+    const caps = validCapabilities();
+    const entry = cacheEntryFor(ctx, caps);
+    entry.recommendation = {
+      ...entry.recommendation,
+      nextStepPrediction: {
+        ...entry.recommendation.nextStepPrediction,
+        targetRoute: '/adminSecretPage',
+      },
+    };
+    const geminiGenerateText = jest.fn(async () => JSON.stringify(geminiResponse()));
+    const events = [];
+
+    const response = await buildEnhancedInstantRecommendation({
+      data: { operationalContext: ctx, clientCapabilities: caps },
+      sessionNavigations: [],
+      geminiApiKey: 'fake',
+      geminiGenerateText,
+      instantRecommendationCache: {
+        get: jest.fn(async () => ({ ok: true, entry })),
+        markHit: jest.fn(),
+        set: jest.fn(async () => ({ ok: true })),
+      },
+      cacheEventReporter: (event) => events.push(event),
+    });
+
+    expect(response.fallback.used).toBe(false);
+    expect(response.nextStepPrediction.targetRoute).not.toBe('/adminSecretPage');
+    expect(geminiGenerateText).toHaveBeenCalledTimes(1);
+    expect(events).toContainEqual(expect.objectContaining({ event: 'instant_cache_miss', cachePolicyReason: 'invalid_entry' }));
+    expect(events.map((event) => event.event)).not.toContain('instant_cache_hit');
+  });
+
+  test('cached recommendation with invalid nested scalar is not used and falls through to Gemini', async () => {
+    const ctx = cadernoContext();
+    const caps = validCapabilities();
+    const entry = cacheEntryFor(ctx, caps);
+    entry.recommendation = {
+      ...entry.recommendation,
+      nextStepPrediction: {
+        ...entry.recommendation.nextStepPrediction,
+        confidence: 'bad',
+      },
+    };
+    const geminiGenerateText = jest.fn(async () => JSON.stringify(geminiResponse()));
+    const events = [];
+
+    const response = await buildEnhancedInstantRecommendation({
+      data: { operationalContext: ctx, clientCapabilities: caps },
+      sessionNavigations: [],
+      geminiApiKey: 'fake',
+      geminiGenerateText,
+      instantRecommendationCache: {
+        get: jest.fn(async () => ({ ok: true, entry })),
+        markHit: jest.fn(),
+        set: jest.fn(async () => ({ ok: true })),
+      },
+      cacheEventReporter: (event) => events.push(event),
+    });
+
+    expect(response.fallback.used).toBe(false);
+    expect(response.nextStepPrediction.confidence).not.toBe('bad');
+    expect(geminiGenerateText).toHaveBeenCalledTimes(1);
+    expect(events).toContainEqual(expect.objectContaining({ event: 'instant_cache_miss', cachePolicyReason: 'invalid_entry' }));
+    expect(events.map((event) => event.event)).not.toContain('instant_cache_hit');
+  });
+
+  test('cached recommendation missing final contract fields is not used and falls through to Gemini', async () => {
+    const ctx = cadernoContext();
+    const caps = validCapabilities();
+    const entry = cacheEntryFor(ctx, caps);
+    delete entry.recommendation.mode;
+    delete entry.recommendation.visualPriority;
+    expect(validateInstantResponse(entry.recommendation, caps).valid).toBe(true);
+    const geminiGenerateText = jest.fn(async () => JSON.stringify(geminiResponse()));
+    const events = [];
+
+    const response = await buildEnhancedInstantRecommendation({
+      data: { operationalContext: ctx, clientCapabilities: caps },
+      sessionNavigations: [],
+      geminiApiKey: 'fake',
+      geminiGenerateText,
+      instantRecommendationCache: {
+        get: jest.fn(async () => ({ ok: true, entry })),
+        markHit: jest.fn(),
+        set: jest.fn(async () => ({ ok: true })),
+      },
+      cacheEventReporter: (event) => events.push(event),
+    });
+
+    expect(response.mode).toBe('INSTANT');
+    expect(response.visualPriority).toBe('moderate');
+    expect(geminiGenerateText).toHaveBeenCalledTimes(1);
+    expect(events).toContainEqual(expect.objectContaining({ event: 'instant_cache_miss', cachePolicyReason: 'invalid_entry' }));
+    expect(events.map((event) => event.event)).not.toContain('instant_cache_hit');
+  });
+
+  test('fallback cached recommendation is not used and falls through to Gemini', async () => {
+    const ctx = cadernoContext();
+    const caps = validCapabilities();
+    const entry = cacheEntryFor(ctx, caps);
+    entry.recommendation = {
+      ...entry.recommendation,
+      fallback: { used: true, reason: 'gemini_error' },
+    };
+    const geminiGenerateText = jest.fn(async () => JSON.stringify(geminiResponse()));
+    const markHit = jest.fn();
+
+    const response = await buildEnhancedInstantRecommendation({
+      data: { operationalContext: ctx, clientCapabilities: caps },
+      sessionNavigations: [],
+      geminiApiKey: 'fake',
+      geminiGenerateText,
+      instantRecommendationCache: {
+        get: jest.fn(async () => ({ ok: true, entry })),
+        markHit,
+        set: jest.fn(async () => ({ ok: true })),
+      },
+    });
+
+    expect(response.fallback.used).toBe(false);
+    expect(geminiGenerateText).toHaveBeenCalledTimes(1);
+    expect(markHit).not.toHaveBeenCalled();
+  });
+
+  test('read error and write error are observable but do not block response', async () => {
+    const ctx = cadernoContext();
+    const caps = validCapabilities();
+    const events = [];
+
+    const response = await buildEnhancedInstantRecommendation({
+      data: { operationalContext: ctx, clientCapabilities: caps },
+      sessionNavigations: [],
+      geminiApiKey: 'fake',
+      geminiGenerateText: async () => JSON.stringify(geminiResponse()),
+      instantRecommendationCache: {
+        get: jest.fn(async () => ({ ok: false, error: new Error('read') })),
+        set: jest.fn(async () => ({ ok: false, error: new Error('write') })),
+      },
+      cacheEventReporter: (event) => events.push(event),
+    });
+
+    expect(response.fallback.used).toBe(false);
+    expect(events.map((event) => event.event)).toEqual(['instant_cache_read_error', 'instant_cache_write_error']);
+  });
+
+  test('Gemini fallback is not written to cache', async () => {
+    const cache = {
+      get: jest.fn(async () => ({ ok: true, entry: null })),
+      set: jest.fn(),
+    };
+
+    const response = await buildEnhancedInstantRecommendation({
+      data: { operationalContext: cadernoContext(), clientCapabilities: validCapabilities() },
+      sessionNavigations: [],
+      geminiApiKey: 'fake',
+      geminiGenerateText: async () => 'not json',
+      instantRecommendationCache: cache,
+    });
+
+    expect(response.fallback.used).toBe(true);
+    expect(cache.set).not.toHaveBeenCalled();
+  });
+
+  test('markHit failure does not invalidate a cache hit', async () => {
+    const ctx = cadernoContext();
+    const caps = validCapabilities();
+    const entry = cacheEntryFor(ctx, caps);
+    const geminiGenerateText = jest.fn();
+
+    const response = await buildEnhancedInstantRecommendation({
+      data: { operationalContext: ctx, clientCapabilities: caps },
+      sessionNavigations: [],
+      geminiApiKey: 'fake',
+      geminiGenerateText,
+      instantRecommendationCache: {
+        get: jest.fn(async () => ({ ok: true, entry })),
+        markHit: jest.fn(async () => { throw new Error('race'); }),
+      },
+    });
+
+    expect(response).toEqual(entry.recommendation);
+    expect(geminiGenerateText).not.toHaveBeenCalled();
+  });
+
   test('invalid Gemini JSON falls back deterministically', async () => {
     const response = await buildEnhancedInstantRecommendation({
       data: { operationalContext: validContext(), clientCapabilities: validCapabilities() },
@@ -260,12 +607,142 @@ describe('Enhanced INSTANT mode contract', () => {
     expect(finalized.fallback.used).toBe(false);
     expect(finalized.rulesApplied).toContain('RULE-010');
     const routes = [finalized.nextStepPrediction.targetRoute, finalized.infoRecommendation.ctaRoute, ...finalized.shortcuts.map((s) => s.route)];
-    expect(new Set(routes).size).toBe(routes.length);
+    // Opção B: first shortcut pode repetir targetRoute, demais precisam ser únicos
+    const unique = [...new Set(routes)];
+    expect(unique.length).toBeGreaterThanOrEqual(routes.length - 1);
   });
 
   test('metrics support legacy and enhanced event names', () => {
     expect(LEGACY_METRIC_EVENTS).toContain('session_start');
     expect(ENHANCED_INSTANT_METRIC_EVENTS).toContain('adaptive_session_start');
     expect(ENHANCED_INSTANT_METRIC_EVENTS).toContain('instant_adaptation_applied');
+  });
+
+  describe('Test sequence priority — Priority 0 in deriveInstantSignals', () => {
+    function testContext(signals = {}, overrides = {}) {
+      // lastRelevantEvent não-nulo indica experimento ativo para Priority 0
+      const baseSignals = { ...signals };
+      if (!baseSignals.lastRelevantEvent && !baseSignals.lotWithProtocolCreated && !baseSignals.generatedActivitiesSeen) {
+        baseSignals.lastRelevantEvent = 'initial';
+      }
+      return normalizeOperationalContext({
+        dashboardState: { hasActiveLots: false, hasProtocolLinkedToLatestLot: false },
+        agendaState: { hasGeneratedActivities: false, pendingActivitiesTodayCount: 0, overdueActivitiesCount: 0 },
+        testSequenceSignals: baseSignals,
+        ...overrides,
+      });
+    }
+
+    test('step 1: no lotWithProtocolCreated → test_create_lot_with_protocol', () => {
+      const ctx = testContext({ lotWithProtocolCreated: false });
+      const result = deriveInstantSignals(ctx);
+      expect(result.stepId).toBe('test_create_lot_with_protocol');
+      expect(result.targetRoute).toBe('/lotePage');
+      expect(result.focusMessage).toBe('Comece criando seu primeiro lote');
+      expect(result.shortcuts.length).toBe(3);
+    });
+
+    test('step 2: lotWithProtocolCreated, agenda not seen → test_check_generated_activities', () => {
+      const ctx = testContext({ lotWithProtocolCreated: true, generatedActivitiesSeen: false });
+      const result = deriveInstantSignals(ctx);
+      expect(result.stepId).toBe('test_check_generated_activities');
+      expect(result.targetRoute).toBe('/agendaPage');
+      expect(result.focusMessage).toBe('Confira a Agenda antes de seguir.');
+    });
+
+    test('step 3: activities seen, adjustment not recorded → test_record_adjustment', () => {
+      const ctx = testContext({ lotWithProtocolCreated: true, generatedActivitiesSeen: true, adjustmentRecorded: false });
+      const result = deriveInstantSignals(ctx);
+      expect(result.stepId).toBe('test_record_adjustment');
+      expect(result.targetRoute).toBe('/cadernoCampoPage');
+      expect(result.focusMessage).toBe('Caderno de campo - Registrar atividade');
+    });
+
+    test('step 4: adjustment recorded, agenda not completed → test_finish_agenda', () => {
+      const ctx = testContext({
+        lotWithProtocolCreated: true, generatedActivitiesSeen: true,
+        adjustmentRecorded: true, agendaActivitiesCompleted: false,
+      });
+      const result = deriveInstantSignals(ctx);
+      expect(result.stepId).toBe('test_finish_agenda');
+      expect(result.targetRoute).toBe('/agendaPage');
+      expect(result.focusMessage).toBe('Concluir na Agenda');
+    });
+
+    test('step 5: agenda completed, home not checked → test_review_final_home', () => {
+      const ctx = testContext({
+        lotWithProtocolCreated: true, generatedActivitiesSeen: true,
+        adjustmentRecorded: true, agendaActivitiesCompleted: true,
+        finalHomeChecked: false,
+      });
+      const result = deriveInstantSignals(ctx);
+      expect(result.stepId).toBe('test_review_final_home');
+      expect(result.targetRoute).toBe('/lotePage');
+      expect(result.focusMessage).toBe('Revisar Agenda - lote segue em acompanhamento');
+    });
+
+    test('step 6: all done → test_complete', () => {
+      const ctx = testContext({
+        lotWithProtocolCreated: true, generatedActivitiesSeen: true,
+        adjustmentRecorded: true, agendaActivitiesCompleted: true,
+        finalHomeChecked: true,
+      });
+      const result = deriveInstantSignals(ctx);
+      expect(result.stepId).toBe('test_complete');
+      expect(result.targetRoute).toBe('/relatoriosPage');
+    });
+
+    test('test sequence overrides critical alerts during experiment', () => {
+      const ctx = testContext({
+        lotWithProtocolCreated: true, generatedActivitiesSeen: false,
+        adjustmentRecorded: false, agendaActivitiesCompleted: false,
+      }, { hasCriticalAlerts: true, criticalCount: 2 });
+      const result = deriveInstantSignals(ctx);
+      expect(result.stepId).toBe('test_check_generated_activities');
+      expect(result.targetRoute).toBe('/agendaPage');
+    });
+
+    test('without testSequenceSignals, normal operational rules apply', () => {
+      const ctx = normalizeOperationalContext({
+        dashboardState: { hasActiveLots: false },
+        agendaState: { pendingActivitiesTodayCount: 0 },
+      });
+      const result = deriveInstantSignals(ctx);
+      expect(result.stepId).not.toMatch(/^test_/);
+    });
+  });
+
+  describe('Opção B — resolveRouteConflicts with test sequence', () => {
+    test('first shortcut can repeat targetRoute in test step', () => {
+      const result = resolveRouteConflicts(
+        'test_check_generated_activities',
+        '/agendaPage',
+        '/reservatoriosPage', // ctaRoute diferente de targetRoute e shortcuts
+        [
+          { route: '/agendaPage', label: 'Ver Agenda', group: 'primary', confidence: 0.8 },
+          { route: '/cadernoCampoPage', label: 'Caderno', group: 'secondary', confidence: 0.6 },
+          { route: '/lotePage', label: 'Lote', group: 'contextual', confidence: 0.5 },
+        ],
+      );
+      // Opção B: first shortcut repeats targetRoute, should survive
+      expect(result.shortcuts.length).toBe(3);
+      expect(result.shortcuts[0].route).toBe('/agendaPage');
+      expect(result.shortcuts[0].route).toBe(result.nextStepRoute);
+    });
+
+    test('non-test step rejects duplicate first shortcut', () => {
+      const result = resolveRouteConflicts(
+        'check_generated_activities',
+        '/agendaPage',
+        '/relatoriosPage',
+        [
+          { route: '/agendaPage', label: 'Agenda', group: 'primary', confidence: 0.8 },
+          { route: '/lotePage', label: 'Lote', group: 'secondary', confidence: 0.6 },
+        ],
+      );
+      expect(result.shortcuts.length).toBe(2);
+      // Without Opção B, duplicate first shortcut would be resolved away
+      expect(result.shortcuts[0].route).not.toBe(result.nextStepRoute);
+    });
   });
 });

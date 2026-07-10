@@ -17,6 +17,7 @@ const {
 } = require('./src/adaptiveContract');
 const { resolveRequestSessionId } = require('./src/sessionContext');
 const { buildEnhancedInstantRecommendation } = require('./src/enhancedInstantMode');
+const { createInstantRecommendationCacheFirestoreAdapter } = require('./src/instantRecommendationCacheFirestoreAdapter');
 const { getSupportedMetricEventsSqlList } = require('./src/adaptiveMetrics');
 const experimentalGroups = require('./src/experimentalGroups');
 
@@ -24,6 +25,7 @@ admin.initializeApp();
 
 const db = admin.firestore();
 const bigquery = new BigQuery();
+const instantRecommendationCache = createInstantRecommendationCacheFirestoreAdapter(db, admin);
 
 // ============================================
 // CONFIGURAÇÃO — via variáveis de ambiente
@@ -185,6 +187,10 @@ function insufficientDataResponse(mode, shortcuts) {
 
 function resolveEffectiveSessionId(requestSessionId, userConfig) {
   return normalizeNonEmptyString(requestSessionId) || normalizeNonEmptyString(userConfig?.sessionId);
+}
+
+function reportInstantCacheEvent(event) {
+  console.log('[CF] INSTANT cache event', event);
 }
 
 function normalizeInstantNavigation(nav) {
@@ -799,6 +805,8 @@ exports.getAdaptiveInterface = onCall(async (request) => {
           data,
           sessionNavigations: navigations,
           geminiApiKey: GEMINI_API_KEY,
+          instantRecommendationCache,
+          cacheEventReporter: reportInstantCacheEvent,
         });
       } catch (error) {
         console.error(`[CF] INSTANT: Erro ao processar sessão:`, error.message);
@@ -809,6 +817,8 @@ exports.getAdaptiveInterface = onCall(async (request) => {
           geminiGenerateText: async () => {
             throw new Error('instant_orchestration_error');
           },
+          instantRecommendationCache,
+          cacheEventReporter: reportInstantCacheEvent,
         });
       }
 

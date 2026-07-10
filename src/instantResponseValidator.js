@@ -3,6 +3,7 @@ const {
   ADAPTIVE_SOURCES,
   ALLOWED_INFO_CTA_ROUTES,
   ALLOWED_INSTANT_ROUTES,
+  DASHBOARD_CONFIG,
   FORBIDDEN_COMPONENTS,
   INFO_RECOMMENDATION_CATEGORIES,
   INFO_RECOMMENDATION_PRIORITIES,
@@ -10,6 +11,7 @@ const {
   INFO_RECOMMENDATION_TYPES,
   SHORTCUT_GROUPS,
   VISUAL_PRIORITIES,
+  hasValidCardType,
 } = require('./adaptiveContract');
 const { RULE_IDS } = require('./instantDomainRules');
 const {
@@ -17,8 +19,38 @@ const {
   supportedInfoTypesFromCapabilities,
   resolveRouteConflicts,
 } = require('./instantInfoRecommendationBuilder');
+const {
+  buildOperationalOnboardingFallback,
+  validateOperationalOnboarding,
+} = require('./instantOperationalOnboardingBuilder');
 
 const UNSAFE_INFO_TEXT_PATTERN = /(?:\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b|@|https?:\/\/|resourceName|cpf|cnpj)/i;
+const FINAL_INSTANT_RESPONSE_KEYS = [
+  'responseVersion',
+  'mode',
+  'source',
+  'dashboard',
+  'dashboardId',
+  'cardType',
+  'confidence',
+  'visualPriority',
+  'nextStepPrediction',
+  'sectionAdaptations',
+  'shortcuts',
+  'focus',
+  'uiTreatment',
+  'reason',
+  'reasonDetails',
+  'rulesApplied',
+  'fallback',
+  'infoRecommendation',
+  'operationalOnboarding',
+];
+const PRIORITIES = ['low', 'medium', 'high'];
+const SECTION_TREATMENTS = ['prominent', 'standard', 'subtle'];
+const UI_DENSITIES = ['comfortable', 'compact'];
+const UI_ANIMATIONS = ['subtle', 'none'];
+const UI_EXPLANATION_VISIBILITIES = ['low', 'medium', 'high'];
 
 function isAllowedRoute(route) {
   return ALLOWED_INSTANT_ROUTES.includes(route);
@@ -213,6 +245,263 @@ function validateInfoRecommendation(infoRecommendation, clientCapabilities) {
   return errors;
 }
 
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isNumberInRange(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
+function isString(value) {
+  return typeof value === 'string';
+}
+
+function hasOnlyStrings(value) {
+  return Array.isArray(value) && value.every(isString);
+}
+
+function pickFinalInstantResponseFields(response) {
+  return Object.fromEntries(FINAL_INSTANT_RESPONSE_KEYS.map((key) => [key, response[key]]));
+}
+
+function plainObjectOrEmpty(value) {
+  return isPlainObject(value) ? value : {};
+}
+
+function sanitizeFinalNextStepPrediction(value) {
+  const nextStep = plainObjectOrEmpty(value);
+  return {
+    stepId: nextStep.stepId,
+    confidence: nextStep.confidence,
+    title: nextStep.title,
+    description: nextStep.description,
+    targetRoute: nextStep.targetRoute,
+    actionLabel: nextStep.actionLabel,
+  };
+}
+
+function sanitizeFinalSectionAdaptation(value) {
+  const section = plainObjectOrEmpty(value);
+  return {
+    sectionId: section.sectionId,
+    component: section.component,
+    priority: section.priority,
+    treatment: section.treatment,
+    title: section.title,
+    description: section.description,
+  };
+}
+
+function sanitizeFinalShortcut(value) {
+  const shortcut = plainObjectOrEmpty(value);
+  return {
+    route: shortcut.route,
+    confidence: shortcut.confidence,
+    label: shortcut.label,
+    description: shortcut.description,
+    group: shortcut.group,
+    reason: shortcut.reason,
+  };
+}
+
+function sanitizeFinalFocus(value) {
+  const focus = plainObjectOrEmpty(value);
+  return {
+    component: focus.component,
+    message: focus.message,
+    targetSectionId: focus.targetSectionId,
+    priority: focus.priority,
+  };
+}
+
+function sanitizeFinalUiTreatment(value) {
+  const uiTreatment = plainObjectOrEmpty(value);
+  return {
+    density: uiTreatment.density,
+    emphasis: uiTreatment.emphasis,
+    animation: uiTreatment.animation,
+    explanationVisibility: uiTreatment.explanationVisibility,
+    showProgressBar: uiTreatment.showProgressBar,
+  };
+}
+
+function sanitizeFinalReasonDetails(value) {
+  const reasonDetails = plainObjectOrEmpty(value);
+  return {
+    summary: reasonDetails.summary,
+    details: Array.isArray(reasonDetails.details) ? [...reasonDetails.details] : reasonDetails.details,
+    display: reasonDetails.display,
+  };
+}
+
+function sanitizeFinalFallback(value) {
+  const fallback = plainObjectOrEmpty(value);
+  return {
+    used: fallback.used,
+    reason: fallback.reason,
+  };
+}
+
+function sanitizeFinalInfoRecommendation(value) {
+  const infoRecommendation = plainObjectOrEmpty(value);
+  return {
+    type: infoRecommendation.type,
+    source: infoRecommendation.source,
+    priority: infoRecommendation.priority,
+    title: infoRecommendation.title,
+    reason: infoRecommendation.reason,
+    ctaRoute: infoRecommendation.ctaRoute,
+    category: infoRecommendation.category,
+  };
+}
+
+function sanitizeFinalOperationalOnboarding(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  return {
+    title: value.title,
+    message: value.message,
+    steps: Array.isArray(value.steps) ? [...value.steps] : value.steps,
+    ctaLabel: value.ctaLabel,
+    targetRoute: value.targetRoute,
+    reason: value.reason,
+    priority: value.priority,
+  };
+}
+
+function sanitizeFinalInstantResponseFields(response) {
+  const sanitized = pickFinalInstantResponseFields(response);
+  return {
+    ...sanitized,
+    nextStepPrediction: sanitizeFinalNextStepPrediction(response.nextStepPrediction),
+    sectionAdaptations: Array.isArray(response.sectionAdaptations)
+      ? response.sectionAdaptations.map(sanitizeFinalSectionAdaptation)
+      : response.sectionAdaptations,
+    shortcuts: Array.isArray(response.shortcuts)
+      ? response.shortcuts.map(sanitizeFinalShortcut)
+      : response.shortcuts,
+    focus: sanitizeFinalFocus(response.focus),
+    uiTreatment: sanitizeFinalUiTreatment(response.uiTreatment),
+    reasonDetails: sanitizeFinalReasonDetails(response.reasonDetails),
+    rulesApplied: Array.isArray(response.rulesApplied) ? [...response.rulesApplied] : response.rulesApplied,
+    fallback: sanitizeFinalFallback(response.fallback),
+    infoRecommendation: sanitizeFinalInfoRecommendation(response.infoRecommendation),
+    operationalOnboarding: sanitizeFinalOperationalOnboarding(response.operationalOnboarding),
+  };
+}
+
+function hasValidFinalNestedContract(response, clientCapabilities) {
+  const dashboardConfig = DASHBOARD_CONFIG[response.dashboardId];
+  if (response.responseVersion !== '1.0'
+    || response.mode !== ADAPTIVE_MODES.INSTANT
+    || response.source !== ADAPTIVE_SOURCES.ADAPTIVE
+    || response.visualPriority !== VISUAL_PRIORITIES.MODERATE
+    || !dashboardConfig
+    || dashboardConfig.displayName !== response.dashboard
+    || !hasValidCardType(response.cardType)
+    || dashboardConfig.cardType !== response.cardType
+    || !isNumberInRange(response.confidence)) {
+    return false;
+  }
+
+  const nextStep = response.nextStepPrediction;
+  if (!isPlainObject(nextStep)
+    || !isString(nextStep.stepId)
+    || !isNumberInRange(nextStep.confidence)
+    || !isString(nextStep.title)
+    || !isString(nextStep.description)
+    || !isAllowedRoute(nextStep.targetRoute)
+    || !isString(nextStep.actionLabel)) {
+    return false;
+  }
+
+  if (!Array.isArray(response.sectionAdaptations)
+    || response.sectionAdaptations.length === 0
+    || response.sectionAdaptations.length > clientCapabilities.maxSectionAdaptations
+    || response.sectionAdaptations.some((section) => !isPlainObject(section)
+      || !isString(section.sectionId)
+      || !isString(section.component)
+      || !PRIORITIES.includes(section.priority)
+      || !SECTION_TREATMENTS.includes(section.treatment)
+      || !isString(section.title)
+      || !isString(section.description))) {
+    return false;
+  }
+
+  if (!Array.isArray(response.shortcuts)
+    || response.shortcuts.length === 0
+    || response.shortcuts.length > (clientCapabilities.maxShortcuts || 3)
+    || response.shortcuts.some((shortcut) => !isPlainObject(shortcut)
+      || !isAllowedRoute(shortcut.route)
+      || !isNumberInRange(shortcut.confidence)
+      || !isString(shortcut.label)
+      || !isString(shortcut.description)
+      || !SHORTCUT_GROUPS.includes(shortcut.group)
+      || !isString(shortcut.reason))) {
+    return false;
+  }
+
+  const focus = response.focus;
+  if (!isPlainObject(focus)
+    || !isString(focus.component)
+    || !isString(focus.message)
+    || !isString(focus.targetSectionId)
+    || !PRIORITIES.includes(focus.priority)) {
+    return false;
+  }
+
+  const uiTreatment = response.uiTreatment;
+  if (!isPlainObject(uiTreatment)
+    || !UI_DENSITIES.includes(uiTreatment.density)
+    || uiTreatment.emphasis !== VISUAL_PRIORITIES.MODERATE
+    || !UI_ANIMATIONS.includes(uiTreatment.animation)
+    || !UI_EXPLANATION_VISIBILITIES.includes(uiTreatment.explanationVisibility)
+    || uiTreatment.showProgressBar !== false) {
+    return false;
+  }
+
+  const reasonDetails = response.reasonDetails;
+  if (!(isString(response.reason) || response.reason === null)
+    || !isPlainObject(reasonDetails)
+    || !isString(reasonDetails.summary)
+    || !hasOnlyStrings(reasonDetails.details)
+    || reasonDetails.display !== 'info_icon'
+    || !hasOnlyStrings(response.rulesApplied)
+    || !isPlainObject(response.fallback)
+    || response.fallback.used !== false
+    || response.fallback.reason !== null) {
+    return false;
+  }
+
+  const opOnboarding = response.operationalOnboarding;
+  if (opOnboarding !== null) {
+    if (!isPlainObject(opOnboarding)
+      || validateOperationalOnboarding(opOnboarding).length > 0) {
+      return false;
+    }
+  }
+
+  return validateInfoRecommendation(response.infoRecommendation, clientCapabilities).length === 0;
+}
+
+function sanitizeFinalInstantResponse(response, clientCapabilities) {
+  if (!isPlainObject(response)) {
+    return null;
+  }
+
+  const sanitized = sanitizeFinalInstantResponseFields(response);
+  if (!hasValidFinalNestedContract(sanitized, clientCapabilities || {})) {
+    return null;
+  }
+  if (!validateInstantResponse(sanitized, clientCapabilities || {}).valid) {
+    return null;
+  }
+
+  return sanitized;
+}
+
 function finalizeValidInstantResponse(response, clientCapabilities, signals) {
   const infoRecommendation = response.infoRecommendation
     && validateInfoRecommendation(response.infoRecommendation, clientCapabilities || {}).length === 0
@@ -256,6 +545,7 @@ function finalizeValidInstantResponse(response, clientCapabilities, signals) {
     infoRecommendation: resolved.infoCtaRoute && infoRecommendation
       ? { ...infoRecommendation, ctaRoute: resolved.infoCtaRoute }
       : infoRecommendation,
+    operationalOnboarding: response.operationalOnboarding || null,
   };
 }
 
@@ -264,4 +554,6 @@ module.exports = {
   validateInstantResponse,
   validateInfoRecommendation,
   finalizeValidInstantResponse,
+  sanitizeFinalInstantResponse,
+  FINAL_INSTANT_RESPONSE_KEYS,
 };

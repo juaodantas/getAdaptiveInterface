@@ -1,5 +1,6 @@
 const { DASHBOARD_CONFIG, SHORTCUT_GROUPS } = require('./adaptiveContract');
 const { normalizeInfoWithSignal } = require('./instantInfoRecommendationBuilder');
+const { normalizeOperationalOnboarding } = require('./instantOperationalOnboardingBuilder');
 
 function clampConfidence(value, fallback = 0.6) {
   const parsed = Number(value);
@@ -85,6 +86,12 @@ function normalizeInstantResponse(raw, clientCapabilities, signals, operationalC
     ? normalizeInfoWithSignal(raw.infoRecommendation, clientCapabilities, signals || { rulesApplied: raw.rulesApplied }, operationalContext)
     : null;
 
+  const operationalOnboarding = normalizeOperationalOnboarding(
+    raw && raw.operationalOnboarding,
+    signals || { rulesApplied: raw && raw.rulesApplied },
+    clientCapabilities,
+  );
+
   return {
     responseVersion: '1.0',
     ...dashboardFields,
@@ -120,6 +127,7 @@ function normalizeInstantResponse(raw, clientCapabilities, signals, operationalC
     },
     rulesApplied: Array.isArray(raw.rulesApplied) ? raw.rulesApplied.filter((rule) => typeof rule === 'string') : [],
     infoRecommendation,
+    operationalOnboarding,
   };
 }
 

@@ -256,22 +256,28 @@ function remapShortcutRoute(shortcut, route) {
 
 function resolveRouteConflicts(stepId, nextStepRoute, infoCtaRoute, shortcuts) {
   const resolver = ROUTE_CONFLICT_RESOLVER[stepId];
-  if (!resolver) return { nextStepRoute, infoCtaRoute, shortcuts };
+  const isTestSequence = typeof stepId === 'string' && stepId.startsWith('test_');
+  if (!resolver && !isTestSequence) return { nextStepRoute, infoCtaRoute, shortcuts };
 
   const usedRoutes = new Set();
   const resolvedInfoCta = (infoCtaRoute && (infoCtaRoute === nextStepRoute || usedRoutes.has(infoCtaRoute)))
-    ? (resolver[infoCtaRoute] || infoCtaRoute)
+    ? (resolver ? (resolver[infoCtaRoute] || infoCtaRoute) : infoCtaRoute)
     : infoCtaRoute;
   if (resolvedInfoCta) usedRoutes.add(resolvedInfoCta);
   if (nextStepRoute) usedRoutes.add(nextStepRoute);
 
-  const resolvedShortcuts = (shortcuts || []).map((sc) => {
+  const resolvedShortcuts = (shortcuts || []).map((sc, index) => {
     if (!sc || !sc.route) return sc;
+    // Opção B: first shortcut in test sequence can repeat nextStepRoute
+    if (isTestSequence && index === 0 && sc.route === nextStepRoute) {
+      usedRoutes.add(sc.route);
+      return sc;
+    }
     if (!usedRoutes.has(sc.route)) {
       usedRoutes.add(sc.route);
       return sc;
     }
-    const alternative = resolver[sc.route] || null;
+    const alternative = resolver ? (resolver[sc.route] || null) : null;
     if (alternative && !usedRoutes.has(alternative)) {
       usedRoutes.add(alternative);
       return remapShortcutRoute(sc, alternative);

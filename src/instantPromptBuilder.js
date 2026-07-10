@@ -159,6 +159,11 @@ function buildInstantPrompt({ navigationContext, sessionNavigations, operational
       stepId: signals.stepId,
       targetRoute: signals.targetRoute,
       description: (signals.rulesApplied || []).join(', '),
+      focusMessage: signals.focusMessage || null,
+      expectedInfoType: signals.expectedInfoType || null,
+      requiredShortcutRoutes: signals.requiredShortcutRoutes || [],
+      forbiddenRoutes: signals.forbiddenRoutes || [],
+      priority: signals.priority || 'normal',
     },
     clientCapabilities: {
       supportedComponents: clientCapabilities.supportedComponents,
@@ -181,8 +186,10 @@ Não retorne progress bar, stepper, checklist nem componente equivalente.
 Rotas permitidas são somente as listadas em allowedRoutes.
 Componentes permitidos são somente os suportados pelo cliente e não proibidos.
 
-OBSERVAÇÃO IMPORTANTE: targetRoute, ctaRoute e cada shortcut.route devem ser TODOS DIFERENTES entre si.
-Nenhuma rota pode se repetir. Se uma rota já foi usada em targetRoute ou ctaRoute, escolha outra para os shortcuts.
+REGRAS DE ROTAS:
+- O primeiro shortcut PODE repetir o targetRoute (representa a ação principal).
+- Os demais shortcuts (segundo em diante) DEVEM ter rotas diferentes entre si e diferentes de targetRoute.
+- infoRecommendation.ctaRoute DEVE ser diferente de targetRoute e do primeiro shortcut.
 
 Contexto da atividade atual disponível em currentActivityContext.
 Use title e description para contextualizar as recomendações (title, description, actionLabel, reason).
@@ -198,16 +205,28 @@ Retorne APENAS JSON válido, sem markdown, seguindo o schema obrigatório:
   "shortcuts":[{"route":"/rota","confidence":0.0,"label":"texto curto","reason":"texto curto"}],
   "reason":"texto curto ou null",
   "reasonDetails":{"summary":"texto curto","details":["sinais técnicos"],"display":"info_icon"},
-  "rulesApplied":["RULE-010"]
+  "rulesApplied":["RULE-010"],
+  "sectionAdaptations":[{"sectionId":"recommended_actions","component":"NextStepCard","priority":"high","treatment":"prominent","title":"texto curto","description":"texto curto"}],
+  "focus":{"component":"AdaptiveFocusBanner","message":"texto curto","targetSectionId":"recommended_actions","priority":"high"},
+  "uiTreatment":{"density":"comfortable","emphasis":"moderate","animation":"subtle","explanationVisibility":"low","showProgressBar":false}
 }
 
 REGRAS:
 - nextStepPrediction.targetRoute deve ser a rota MAIS importante para o passo atual.
-- infoRecommendation.ctaRoute deve ser DIFERENTE de targetRoute.
-- shortcuts deve respeitar clientCapabilities.maxShortcuts. Cada shortcut.route deve ser DIFERENTE de targetRoute e de ctaRoute.
+- infoRecommendation.ctaRoute DEVE ser diferente de targetRoute e do primeiro shortcut.
+- shortcuts deve respeitar clientCapabilities.maxShortcuts. O primeiro shortcut PODE repetir targetRoute; os demais DEVEM ser diferentes entre si e de targetRoute.
 - infoRecommendation.type deve usar um dos tipos permitidos.
 - infoRecommendation.ctaRoute deve estar na allowlist da Info.
 - shortcuts[].route deve estar em allowedRoutes.
+
+Quando stepContext.priority = "mandatory_test_sequence":
+- Use OBRIGATORIAMENTE stepContext.targetRoute em nextStepPrediction.targetRoute.
+- O primeiro shortcut pode repetir stepContext.targetRoute.
+- Os shortcuts seguintes DEVEM seguir stepContext.requiredShortcutRoutes na ordem informada.
+- Use stepContext.focusMessage como base para mensagem do FocusBanner.
+- Use stepContext.expectedInfoType para infoRecommendation.type (se não suportado, use fallback).
+- NÃO recomende rotas fora de stepContext.requiredShortcutRoutes.
+- NÃO inclua progress bar, stepper, checklist ou equivalente.
 
 JSON de contexto sanitizado:
 ${JSON.stringify(promptPayload)}`;

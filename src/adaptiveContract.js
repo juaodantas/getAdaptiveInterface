@@ -112,6 +112,7 @@ const FORBIDDEN_COMPONENTS = [
 ];
 
 const DEFAULT_SUPPORTED_COMPONENTS = [
+  'OperationalOnboardingCard',
   'NextStepCard',
   'ContextualOnboardingCard',
   'ActivityFeedCard',

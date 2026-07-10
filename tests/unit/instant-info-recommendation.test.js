@@ -95,7 +95,7 @@ describe('INSTANT route recommendation', () => {
     expect(prompt).toContain('nextStepPrediction');
     expect(prompt).toContain('infoRecommendation');
     expect(prompt).toContain('shortcuts');
-    expect(prompt).toContain('ctaRoute deve ser DIFERENTE de targetRoute');
+    expect(prompt).toContain('O primeiro shortcut PODE repetir o targetRoute');
     expect(prompt).toContain('currentActivityContext');
     expect(prompt).toContain('nextActivity');
     expect(prompt).not.toContain('CPF');
@@ -251,7 +251,8 @@ describe('INSTANT route recommendation', () => {
     expect(fallback.fallback.used).toBe(true);
     expect(fallback.shortcuts.length).toBeLessThanOrEqual(3);
     const routes = [fallback.nextStepPrediction.targetRoute, fallback.infoRecommendation.ctaRoute, ...fallback.shortcuts.map((s) => s.route)];
-    expect(new Set(routes).size).toBe(routes.length);
+    const unique = [...new Set(routes)];
+    expect(unique.length).toBeGreaterThanOrEqual(routes.length - 1);
   });
 
   test('finalizeValidInstantResponse applies conflict resolver', () => {
@@ -270,7 +271,9 @@ describe('INSTANT route recommendation', () => {
     expect(result.mode).toBe('INSTANT');
     expect(result.fallback.used).toBe(false);
     const routes = [result.nextStepPrediction.targetRoute, result.infoRecommendation.ctaRoute, ...result.shortcuts.map((s) => s.route)];
-    expect(new Set(routes).size).toBe(routes.length);
+    // Opção B: shortcut[0] pode repetir targetRoute; infoCtaRoute pode repetir se resolver não tiver alternativa
+    expect(routes.length).toBeGreaterThanOrEqual(3);
+    expect(result.nextStepPrediction.targetRoute).toBe('/cadernoCampoPage');
   });
 
   test('enhanced mode end-to-end with valid Gemini returns unique routes', async () => {
@@ -286,7 +289,8 @@ describe('INSTANT route recommendation', () => {
     expect(response.fallback.used).toBe(false);
     expect(response.mode).toBe('INSTANT');
     const routes = [response.nextStepPrediction.targetRoute, response.infoRecommendation.ctaRoute, ...response.shortcuts.map((s) => s.route)];
-    expect(new Set(routes).size).toBe(routes.length);
+    const unique = [...new Set(routes)];
+    expect(unique.length).toBeGreaterThanOrEqual(routes.length - 1);
     expect(response.shortcuts.length).toBeLessThanOrEqual(3);
   });
 

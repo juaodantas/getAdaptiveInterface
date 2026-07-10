@@ -14,6 +14,12 @@ const RULE_IDS = {
   RESERVOIR_ATTENTION: 'RULE-013',
   PRODUCTION_CONTEXT: 'RULE-014',
   TEAM_CONTEXT: 'RULE-015',
+  TEST_CREATE_LOT: 'RULE-016',
+  TEST_CHECK_ACTIVITIES: 'RULE-017',
+  TEST_RECORD_ADJUSTMENT: 'RULE-018',
+  TEST_FINISH_AGENDA: 'RULE-019',
+  TEST_REVIEW_FINAL: 'RULE-020',
+  TEST_COMPLETE: 'RULE-021',
 };
 
 const DOMAIN_RULES = [
@@ -32,6 +38,12 @@ const DOMAIN_RULES = [
   { id: RULE_IDS.RESERVOIR_ATTENTION, description: 'Há sinais de reservatório ou solução nutritiva: recomendar reservatórios/solução.' },
   { id: RULE_IDS.PRODUCTION_CONTEXT, description: 'Há dados de produção ou cultivo: recomendar resumo operacional.' },
   { id: RULE_IDS.TEAM_CONTEXT, description: 'Há sinais de equipe: recomendar saúde da equipe.' },
+  { id: RULE_IDS.TEST_CREATE_LOT, description: '[Test] Criar primeiro lote com protocolo.' },
+  { id: RULE_IDS.TEST_CHECK_ACTIVITIES, description: '[Test] Conferir atividades geradas na Agenda.' },
+  { id: RULE_IDS.TEST_RECORD_ADJUSTMENT, description: '[Test] Registrar ajuste no Caderno de Campo.' },
+  { id: RULE_IDS.TEST_FINISH_AGENDA, description: '[Test] Finalizar atividades pendentes na Agenda.' },
+  { id: RULE_IDS.TEST_REVIEW_FINAL, description: '[Test] Revisar lote em acompanhamento.' },
+  { id: RULE_IDS.TEST_COMPLETE, description: '[Test] Roteiro concluído.' },
 ];
 
 const ROUTE_CONFLICT_RESOLVER = {
@@ -132,6 +144,102 @@ const STEP_SHORTCUTS = {
   review_team: [{ route: '/gerenciarEquipePage', label: 'Equipe', description: 'Revise saúde operacional da equipe', group: 'primary' }, { route: '/agendaPage', label: 'Agenda', description: 'Acompanhe atividades da equipe', group: 'secondary' }, { route: '/relatoriosPage', label: 'Relatórios', description: 'Veja indicadores da equipe', group: 'contextual' }],
 };
 
+const TEST_SEQUENCE_SHORTCUTS = {
+  test_create_lot_with_protocol: [
+    { route: '/lotePage', label: 'Criar primeiro lote', description: 'Comece vinculando um protocolo ao lote', group: 'primary' },
+    { route: '/protocoloPage', label: 'Ver protocolos', description: 'Consulte os protocolos de cultivo disponíveis', group: 'secondary' },
+    { route: '/areaCultivoPage', label: 'Áreas de cultivo', description: 'Configure a estrutura de áreas de cultivo', group: 'contextual' },
+  ],
+  test_check_generated_activities: [
+    { route: '/agendaPage', label: 'Ver Agenda', description: 'Confira as atividades geradas para o primeiro dia', group: 'primary' },
+    { route: '/lotePage', label: 'Ver Lote', description: 'Consulte o lote vinculado ao protocolo', group: 'secondary' },
+    { route: '/cadernoCampoPage', label: 'Caderno de Campo', description: 'Acesse o caderno de campo', group: 'contextual' },
+  ],
+  test_record_adjustment: [
+    { route: '/cadernoCampoPage', label: 'Caderno de Campo', description: 'Registre a atividade no caderno de campo', group: 'primary' },
+    { route: '/agendaPage', label: 'Ver Agenda', description: 'Consulte a programação de atividades', group: 'secondary' },
+    { route: '/lotePage', label: 'Ver Lote', description: 'Veja os detalhes do lote', group: 'contextual' },
+  ],
+  test_finish_agenda: [
+    { route: '/agendaPage', label: 'Concluir na Agenda', description: 'Finalize as atividades pendentes na agenda', group: 'primary' },
+    { route: '/cadernoCampoPage', label: 'Caderno de Campo', description: 'Confira os últimos registros no caderno', group: 'secondary' },
+    { route: '/lotePage', label: 'Ver Lote', description: 'Acompanhe o lote em produção', group: 'contextual' },
+  ],
+  test_review_final_home: [
+    { route: '/lotePage', label: 'Ver Lote', description: 'Revise o lote em acompanhamento', group: 'primary' },
+    { route: '/cadernoCampoPage', label: 'Caderno de Campo', description: 'Confira os registros do caderno', group: 'secondary' },
+    { route: '/agendaPage', label: 'Ver Agenda', description: 'Acompanhe o histórico de atividades', group: 'contextual' },
+  ],
+  test_complete: [
+    { route: '/relatoriosPage', label: 'Ver Relatórios', description: 'Revise o resumo completo do roteiro', group: 'primary' },
+    { route: '/agendaPage', label: 'Agenda', description: 'Acesse o histórico de atividades', group: 'secondary' },
+    { route: '/lotePage', label: 'Lote', description: 'Consulte o lote utilizado', group: 'contextual' },
+  ],
+};
+
+const TEST_SEQUENCE_STEPS = {
+  test_create_lot_with_protocol: {
+    stepId: 'test_create_lot_with_protocol',
+    targetRoute: '/lotePage',
+    dashboardId: 'LOTE_PRODUCAO',
+    focusMessage: 'Comece criando seu primeiro lote',
+    expectedInfoType: 'basic_tip',
+    requiredShortcutRoutes: ['/lotePage', '/protocoloPage', '/areaCultivoPage'],
+    forbiddenRoutes: ['/relatoriosPage', '/reservatoriosPage', '/gerenciarEquipePage'],
+    priority: 'mandatory_test_sequence',
+  },
+  test_check_generated_activities: {
+    stepId: 'test_check_generated_activities',
+    targetRoute: '/agendaPage',
+    dashboardId: 'TAREFAS_PENDENTES',
+    focusMessage: 'Confira a Agenda antes de seguir.',
+    expectedInfoType: 'today_cultivation',
+    requiredShortcutRoutes: ['/agendaPage', '/lotePage', '/cadernoCampoPage'],
+    forbiddenRoutes: ['/relatoriosPage', '/reservatoriosPage', '/gerenciarEquipePage'],
+    priority: 'mandatory_test_sequence',
+  },
+  test_record_adjustment: {
+    stepId: 'test_record_adjustment',
+    targetRoute: '/cadernoCampoPage',
+    dashboardId: 'TAREFAS_PENDENTES',
+    focusMessage: 'Caderno de campo - Registrar atividade',
+    expectedInfoType: 'today_cultivation',
+    requiredShortcutRoutes: ['/cadernoCampoPage', '/agendaPage', '/lotePage'],
+    forbiddenRoutes: ['/relatoriosPage', '/reservatoriosPage', '/gerenciarEquipePage'],
+    priority: 'mandatory_test_sequence',
+  },
+  test_finish_agenda: {
+    stepId: 'test_finish_agenda',
+    targetRoute: '/agendaPage',
+    dashboardId: 'TAREFAS_PENDENTES',
+    focusMessage: 'Concluir na Agenda',
+    expectedInfoType: 'field_notes_summary',
+    requiredShortcutRoutes: ['/agendaPage', '/cadernoCampoPage', '/lotePage'],
+    forbiddenRoutes: ['/relatoriosPage', '/reservatoriosPage', '/gerenciarEquipePage'],
+    priority: 'mandatory_test_sequence',
+  },
+  test_review_final_home: {
+    stepId: 'test_review_final_home',
+    targetRoute: '/lotePage',
+    dashboardId: 'TAREFAS_PENDENTES',
+    focusMessage: 'Revisar Agenda - lote segue em acompanhamento',
+    expectedInfoType: 'basic_tip',
+    requiredShortcutRoutes: ['/lotePage', '/cadernoCampoPage', '/agendaPage'],
+    forbiddenRoutes: ['/relatoriosPage', '/reservatoriosPage', '/gerenciarEquipePage'],
+    priority: 'mandatory_test_sequence',
+  },
+  test_complete: {
+    stepId: 'test_complete',
+    targetRoute: '/relatoriosPage',
+    dashboardId: 'TAREFAS_PENDENTES',
+    focusMessage: 'Roteiro de teste concluído',
+    expectedInfoType: 'basic_tip',
+    requiredShortcutRoutes: ['/relatoriosPage', '/agendaPage', '/lotePage'],
+    forbiddenRoutes: ['/reservatoriosPage', '/gerenciarEquipePage'],
+    priority: 'mandatory_test_sequence',
+  },
+};
+
 function applyShortcutConfidence(shortcuts, baseConfidence) {
   return shortcuts.map((shortcut, index) => {
     const multiplier = index === 0 ? 1.0 : index === 1 ? 0.85 : 0.75;
@@ -140,6 +248,42 @@ function applyShortcutConfidence(shortcuts, baseConfidence) {
       confidence: Math.round(baseConfidence * multiplier * 100) / 100,
     };
   });
+}
+
+function resolveTestSequenceStep(effective) {
+  if (effective.lotWithProtocolCreated === undefined) {
+    return null;
+  }
+
+  const rulesApplied = [RULE_IDS.NO_PROGRESS_BAR];
+
+  if (!effective.lotWithProtocolCreated) {
+    rulesApplied.push(RULE_IDS.TEST_CREATE_LOT);
+    return { ...TEST_SEQUENCE_STEPS.test_create_lot_with_protocol, rulesApplied, shortcuts: applyShortcutConfidence(TEST_SEQUENCE_SHORTCUTS.test_create_lot_with_protocol, 0.85) };
+  }
+
+  if (!effective.generatedActivitiesSeen) {
+    rulesApplied.push(RULE_IDS.TEST_CHECK_ACTIVITIES);
+    return { ...TEST_SEQUENCE_STEPS.test_check_generated_activities, rulesApplied, shortcuts: applyShortcutConfidence(TEST_SEQUENCE_SHORTCUTS.test_check_generated_activities, 0.8) };
+  }
+
+  if (!effective.adjustmentRecorded) {
+    rulesApplied.push(RULE_IDS.TEST_RECORD_ADJUSTMENT);
+    return { ...TEST_SEQUENCE_STEPS.test_record_adjustment, rulesApplied, shortcuts: applyShortcutConfidence(TEST_SEQUENCE_SHORTCUTS.test_record_adjustment, 0.8) };
+  }
+
+  if (!effective.agendaActivitiesCompleted) {
+    rulesApplied.push(RULE_IDS.TEST_FINISH_AGENDA);
+    return { ...TEST_SEQUENCE_STEPS.test_finish_agenda, rulesApplied, shortcuts: applyShortcutConfidence(TEST_SEQUENCE_SHORTCUTS.test_finish_agenda, 0.8) };
+  }
+
+  if (!effective.finalHomeChecked) {
+    rulesApplied.push(RULE_IDS.TEST_REVIEW_FINAL);
+    return { ...TEST_SEQUENCE_STEPS.test_review_final_home, rulesApplied, shortcuts: applyShortcutConfidence(TEST_SEQUENCE_SHORTCUTS.test_review_final_home, 0.75) };
+  }
+
+  rulesApplied.push(RULE_IDS.TEST_COMPLETE);
+  return { ...TEST_SEQUENCE_STEPS.test_complete, rulesApplied, shortcuts: applyShortcutConfidence(TEST_SEQUENCE_SHORTCUTS.test_complete, 0.6) };
 }
 
 function deriveInstantSignals(context) {
@@ -205,6 +349,18 @@ function deriveInstantSignals(context) {
     && effective.generatedActivitiesSeen
     && !notebook.hasRecentFieldNotes
     && !notebook.hasRecentNutritionAdjustmentRecord;
+
+  // Priority 0: Test sequence — overrides everything during experiment
+  // Ativado quando o app envia lastRelevantEvent não-nulo, indicando
+  // que os sinais de sequência foram explicitamente inicializados.
+  const testSeq = context.testSequenceSignals;
+  const hasActiveTestSequence = testSeq && (testSeq.lastRelevantEvent !== null || testSeq.lotWithProtocolCreated || testSeq.generatedActivitiesSeen || testSeq.adjustmentRecorded || testSeq.agendaActivitiesCompleted || testSeq.finalHomeChecked);
+  if (hasActiveTestSequence) {
+    const testStep = resolveTestSequenceStep(effective);
+    if (testStep) {
+      return testStep;
+    }
+  }
 
   // Priority 1: Critical alerts override sequence
   if (alerts.hasCriticalAlerts || alerts.criticalCount > 0) {
@@ -314,4 +470,7 @@ module.exports = {
   deriveInstantSignals,
   STEP_SHORTCUTS,
   ROUTE_CONFLICT_RESOLVER,
+  TEST_SEQUENCE_SHORTCUTS,
+  TEST_SEQUENCE_STEPS,
+  resolveTestSequenceStep,
 };
