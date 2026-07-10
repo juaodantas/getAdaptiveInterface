@@ -2,6 +2,7 @@ const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https")
 const { BigQuery } = require("@google-cloud/bigquery");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const admin = require("firebase-admin");
+const jwt = require('jsonwebtoken');
 const {
   ADAPTIVE_MODES,
   VISUAL_PRIORITIES,
@@ -17,6 +18,7 @@ const {
 const { resolveRequestSessionId } = require('./src/sessionContext');
 const { buildEnhancedInstantRecommendation } = require('./src/enhancedInstantMode');
 const { getSupportedMetricEventsSqlList } = require('./src/adaptiveMetrics');
+const experimentalGroups = require('./src/experimentalGroups');
 
 admin.initializeApp();
 
@@ -908,6 +910,36 @@ exports.generateDailyRecommendations = onRequest(
   },
 );
 
+exports.autoAssignAdaptiveExperiment = onCall(async (request) => {
+  const { userId, isisToken } = request.data || {};
+  const uid = userId ? String(userId).trim() : null;
+
+  if (!uid || !isisToken) {
+    throw new HttpsError('invalid-argument', 'userId e isisToken são obrigatórios');
+  }
+
+  if (!process.env.ISIS_JWT_SECRET) {
+    throw new HttpsError('failed-precondition', 'ISIS_JWT_SECRET não configurado');
+  }
+
+  try {
+    const payload = jwt.verify(isisToken, process.env.ISIS_JWT_SECRET);
+    if (String(payload?.id) !== uid) {
+      throw new HttpsError('permission-denied', 'Token não pertence ao usuário informado');
+    }
+  } catch (error) {
+    if (error instanceof HttpsError) throw error;
+    throw new HttpsError('unauthenticated', 'Token ISIS inválido');
+  }
+
+  try {
+    return await experimentalGroups.autoAssignParticipant(db, admin, uid);
+  } catch (error) {
+    console.error('[ExperimentalGroups] Erro na autoatribuição:', error.message);
+    throw new HttpsError(error.isValidationError ? 'invalid-argument' : 'internal', error.message);
+  }
+});
+
 // ============================================
 // ADMIN ADAPTIVE MODE — API HTTP para gestão
 // ============================================
@@ -947,6 +979,18 @@ exports.adminAdaptiveMode = onRequest(
     try {
       // GET — listar ou buscar config
       if (method === 'GET') {
+        const collection = req.query?.collection || req.body?.collection;
+        if (collection === 'experimentalGroups') {
+          const experimentId = req.query?.id || req.query?.experimentId || req.body?.id || req.body?.experimentId;
+          if (experimentId) {
+            const experiment = await experimentalGroups.getExperiment(db, experimentId);
+            return res.json(experiment);
+          }
+
+          const experiments = await experimentalGroups.listExperiments(db);
+          return res.json(experiments);
+        }
+
         const userId = req.query?.userId || req.body?.userId;
 
         if (userId) {
@@ -964,6 +1008,31 @@ exports.adminAdaptiveMode = onRequest(
       // POST / PUT — criar ou atualizar config
       if (method === 'POST' || method === 'PUT') {
         const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+        if (body.action === 'advanceExperimentPeriod') {
+          const result = await experimentalGroups.advanceExperimentPeriod(db, admin, body.experimentId);
+          return res.json(result);
+        }
+
+        if (body.action === 'assignParticipantToGroup') {
+          const result = await experimentalGroups.assignParticipantToGroup(db, admin, body);
+          return res.json(result);
+        }
+
+        if (body.action === 'completeExperiment') {
+          const result = await experimentalGroups.completeExperiment(db, admin, body.experimentId);
+          return res.json(result);
+        }
+
+        if (body.action === 'autoAssignParticipant') {
+          const result = await experimentalGroups.autoAssignParticipant(db, admin, body.userId);
+          return res.json(result);
+        }
+
+        if (body.collection === 'experimentalGroups') {
+          const result = await experimentalGroups.saveExperiment(db, admin, body);
+          return res.json(result);
+        }
+
         const { userId, mode, sessionId, testGroup, expiresAt } = body;
 
         if (!userId || !mode) {
@@ -1011,6 +1080,13 @@ exports.adminAdaptiveMode = onRequest(
 
       // DELETE — encerrar sessão e remover config
       if (method === 'DELETE') {
+        const collection = req.query?.collection || req.body?.collection;
+        if (collection === 'experimentalGroups') {
+          const experimentId = req.query?.id || req.query?.experimentId || req.body?.id || req.body?.experimentId;
+          const result = await experimentalGroups.deleteExperiment(db, experimentId);
+          return res.json(result);
+        }
+
         const userId = req.query?.userId || req.body?.userId;
         if (!userId) {
           return res.status(400).json({ error: 'userId é obrigatório' });
