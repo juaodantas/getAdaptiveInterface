@@ -135,6 +135,7 @@ describe('Enhanced INSTANT mode contract', () => {
     expect(prompt).toContain('infoRecommendation');
     expect(prompt).toContain('shortcuts');
     expect(prompt).toContain('O primeiro shortcut PODE repetir o targetRoute');
+    expect(prompt).toContain('Retorne infoRecommendation válido');
     expect(prompt).not.toContain('Maria');
     expect(prompt).not.toContain('CPF 123');
   });
@@ -155,6 +156,25 @@ describe('Enhanced INSTANT mode contract', () => {
     expect(prompt).toContain('Não retorne progress bar, stepper, checklist');
     expect(prompt).not.toContain('resourceName');
     expect(prompt).not.toContain('Lote Identificável');
+  });
+
+  test('prompt nulls infoRecommendation only for onboarding-capable create lot step', () => {
+    const onboardingContext = normalizeOperationalContext({
+      dashboardState: { hasActiveLots: false, hasProtocolLinkedToLatestLot: false },
+      agendaState: { hasGeneratedActivities: false, pendingActivitiesTodayCount: 0 },
+    });
+    const prompt = buildInstantPrompt({
+      navigationContext: { currentRoute: '/homePage', recentRoutes: [] },
+      sessionNavigations: [],
+      operationalContext: onboardingContext,
+      clientCapabilities: validCapabilities({
+        supportedComponents: ['NextStepCard', 'AdaptiveFocusBanner', 'OperationalOnboardingCard'],
+      }),
+      signals: deriveInstantSignals(onboardingContext),
+    });
+
+    expect(prompt).toContain('stepContext.stepId === "create_lot_with_protocol" e OperationalOnboardingCard estiver suportado');
+    expect(prompt).toContain('retorne infoRecommendation: null');
   });
 
   test('prompt removes PII and arbitrary strings from context', async () => {

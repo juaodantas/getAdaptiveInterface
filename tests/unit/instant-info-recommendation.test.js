@@ -119,6 +119,15 @@ describe('INSTANT route recommendation', () => {
     expect(normalized.confidence).toBe(0.84);
   });
 
+  test('non-create_lot steps still require a valid infoRecommendation', () => {
+    const signals = deriveInstantSignals(cadernoContext());
+    const normalized = normalizeInstantResponse(geminiResponse({ infoRecommendation: null }), capabilities(), signals, cadernoContext());
+    const validation = validateInstantResponse(normalized, capabilities());
+
+    expect(validation.valid).toBe(false);
+    expect(validation.errors).toContain('missing_info_recommendation');
+  });
+
   test('normalizer respects client maxShortcuts up to 4', () => {
     const signals = deriveInstantSignals(cadernoContext());
     const manyShortcuts = geminiResponse({

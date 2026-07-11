@@ -82,15 +82,16 @@ function normalizeInstantResponse(raw, clientCapabilities, signals, operationalC
   const legacyReasonDetails = raw.reason && typeof raw.reason === 'object' ? raw.reason : {};
   const reasonDetails = Object.keys(rawReasonDetails).length > 0 ? rawReasonDetails : legacyReasonDetails;
   const reason = typeof raw.reason === 'string' ? raw.reason : null;
-  const infoRecommendation = raw.infoRecommendation
-    ? normalizeInfoWithSignal(raw.infoRecommendation, clientCapabilities, signals || { rulesApplied: raw.rulesApplied }, operationalContext)
-    : null;
-
   const operationalOnboarding = normalizeOperationalOnboarding(
     raw && raw.operationalOnboarding,
     signals || { rulesApplied: raw && raw.rulesApplied },
     clientCapabilities,
   );
+  const infoRecommendation = signals?.stepId === 'create_lot_with_protocol' && operationalOnboarding
+    ? null
+    : raw.infoRecommendation
+      ? normalizeInfoWithSignal(raw.infoRecommendation, clientCapabilities, signals || { rulesApplied: raw.rulesApplied }, operationalContext)
+      : null;
 
   return {
     responseVersion: '1.0',

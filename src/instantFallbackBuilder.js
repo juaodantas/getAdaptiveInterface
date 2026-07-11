@@ -8,6 +8,10 @@ const {
 const { deriveInstantSignals } = require('./instantDomainRules');
 const { buildInfoRecommendationFallback, resolveRouteConflicts } = require('./instantInfoRecommendationBuilder');
 const { buildOperationalOnboardingFallback } = require('./instantOperationalOnboardingBuilder');
+const {
+  canonicalizeOnboardingSecondaryShortcuts,
+  shouldUseOnboardingInfoSlot,
+} = require('./instantOnboardingInfoSlot');
 
 const STEP_COPY = {
   create_lot_with_protocol: {
@@ -77,13 +81,23 @@ const STEP_COPY = {
   },
 };
 
+function usesOperationalOnboardingInfoSlot(stepId, operationalOnboarding) {
+  return shouldUseOnboardingInfoSlot(stepId, operationalOnboarding);
+}
+
 function buildEnhancedInstantFallback({ operationalContext, clientCapabilities, reason = 'deterministic_fallback' }) {
   const signals = deriveInstantSignals(operationalContext);
   const dashboard = DASHBOARD_CONFIG[signals.dashboardId] || DASHBOARD_CONFIG.TAREFAS_PENDENTES;
   const copy = STEP_COPY[signals.stepId] || STEP_COPY.create_lot_with_protocol;
   const confidence = reason === 'gemini_invalid_response' ? 0.68 : 0.64;
+  const operationalOnboarding = clientCapabilities?.supportedComponents?.includes('OperationalOnboardingCard')
+    ? buildOperationalOnboardingFallback({ signals })
+    : null;
+  const onboardingOwnsInfoSlot = usesOperationalOnboardingInfoSlot(signals.stepId, operationalOnboarding);
 
-  const infoRec = buildInfoRecommendationFallback({ signals, clientCapabilities: clientCapabilities || {}, operationalContext });
+  const infoRec = onboardingOwnsInfoSlot
+    ? null
+    : buildInfoRecommendationFallback({ signals, clientCapabilities: clientCapabilities || {}, operationalContext });
   const maxShortcuts = Math.max(1, (clientCapabilities && clientCapabilities.maxShortcuts) || 3);
 
   const rawShortcuts = (signals.shortcuts || []).slice(0, maxShortcuts).map((sc, index) => ({
@@ -95,7 +109,8 @@ function buildEnhancedInstantFallback({ operationalContext, clientCapabilities, 
     reason: sc.description || copy.description,
   }));
 
-  const resolved = resolveRouteConflicts(signals.stepId, signals.targetRoute, infoRec.ctaRoute, rawShortcuts);
+  const resolved = resolveRouteConflicts(signals.stepId, signals.targetRoute, infoRec ? infoRec.ctaRoute : null, rawShortcuts);
+  const resolvedShortcuts = canonicalizeOnboardingSecondaryShortcuts(signals.stepId, operationalOnboarding, resolved.shortcuts);
 
   const finalInfoRec = resolved.infoCtaRoute && infoRec
     ? { ...infoRec, ctaRoute: resolved.infoCtaRoute }
@@ -128,7 +143,7 @@ function buildEnhancedInstantFallback({ operationalContext, clientCapabilities, 
         description: copy.description,
       },
     ],
-    shortcuts: resolved.shortcuts,
+    shortcuts: resolvedShortcuts,
     focus: {
       component: 'AdaptiveFocusBanner',
       message: signals.focusMessage || copy.title,
@@ -150,9 +165,7 @@ function buildEnhancedInstantFallback({ operationalContext, clientCapabilities, 
     },
     rulesApplied: signals.rulesApplied,
     infoRecommendation: finalInfoRec,
-    operationalOnboarding: clientCapabilities?.supportedComponents?.includes('OperationalOnboardingCard')
-      ? buildOperationalOnboardingFallback({ signals })
-      : null,
+    operationalOnboarding,
     fallback: {
       used: true,
       reason,

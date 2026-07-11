@@ -150,7 +150,7 @@ describe('Scenario 1: create_lot_with_protocol with OperationalOnboardingCard ca
       'Acompanhe as atividades geradas na agenda',
     ]);
     expect(result.ctaLabel).toBe('Criar primeiro lote');
-    expect(result.targetRoute).toBe('/protocoloPage');
+    expect(result.targetRoute).toBe('/areaCultivoPage');
     expect(result.reason).toBe('Não há lote com protocolo: recomendar cadastro de lote com protocolo.');
     expect(result.priority).toBe(20);
   });
@@ -160,7 +160,7 @@ describe('Scenario 1: create_lot_with_protocol with OperationalOnboardingCard ca
 
     expect(result).not.toBeNull();
     expect(result.title).toBe('Como começar');
-    expect(result.targetRoute).toBe('/protocoloPage');
+    expect(result.targetRoute).toBe('/areaCultivoPage');
   });
 });
 
@@ -264,7 +264,7 @@ describe('Scenario 7: invalid Gemini input but matching stepId', () => {
 
     expect(result).not.toBeNull();
     expect(result.title).toBe('Como começar');
-    expect(result.targetRoute).toBe('/protocoloPage');
+    expect(result.targetRoute).toBe('/areaCultivoPage');
   });
 
   test('normalizeOperationalOnboarding uses fallback when Gemini value has missing fields', () => {
@@ -272,7 +272,7 @@ describe('Scenario 7: invalid Gemini input but matching stepId', () => {
 
     expect(result).not.toBeNull();
     expect(result.title).toBe('Como começar');
-    expect(result.targetRoute).toBe('/protocoloPage');
+    expect(result.targetRoute).toBe('/areaCultivoPage');
   });
 
   test('normalizeOperationalOnboarding uses fallback when Gemini value is an array (invalid type)', () => {
@@ -457,7 +457,7 @@ describe('Scenario 14: buildOperationalOnboardingFallback with matching stepId',
       ],
       ctaLabel: 'Criar primeiro lote',
       priority: 20,
-      targetRoute: '/protocoloPage',
+      targetRoute: '/areaCultivoPage',
       reason: 'Não há lote com protocolo: recomendar cadastro de lote com protocolo.',
     });
   });
@@ -473,7 +473,7 @@ describe('Scenario 14: buildOperationalOnboardingFallback with matching stepId',
       signals: fullSignals({ targetRoute: undefined }),
     });
 
-    expect(result.targetRoute).toBe('/protocoloPage');
+    expect(result.targetRoute).toBe('/areaCultivoPage');
   });
 });
 
@@ -504,7 +504,7 @@ describe('normalizeOperationalOnboarding with valid Gemini input', () => {
       message: '  Crie seu primeiro lote  ',
       steps: ['  Passo um  ', '  Passo dois  '],
       ctaLabel: '  Criar  ',
-      targetRoute: '/protocoloPage',
+      targetRoute: '/areaCultivoPage',
       reason: '  Motivo qualquer  ',
       priority: 30,
     };
@@ -516,7 +516,7 @@ describe('normalizeOperationalOnboarding with valid Gemini input', () => {
       message: 'Crie seu primeiro lote',
       steps: ['Passo um', 'Passo dois'],
       ctaLabel: 'Criar',
-      targetRoute: '/protocoloPage',
+      targetRoute: '/areaCultivoPage',
       reason: 'Motivo qualquer',
       priority: 30,
     });
@@ -634,6 +634,15 @@ describe('normalizeInstantResponse integration', () => {
       reason: 'Test reason',
       reasonDetails: { summary: 'Test', details: ['RULE-001'], display: 'info_icon' },
       rulesApplied: ['RULE-001', 'RULE-010'],
+      infoRecommendation: {
+        type: 'basic_tip',
+        source: 'local_tip',
+        priority: 'high',
+        title: 'Dica operacional',
+        reason: 'Há um próximo passo seguro para continuar o fluxo.',
+        ctaRoute: '/protocoloPage',
+        category: 'protocolo',
+      },
       operationalOnboarding: {
         title: 'Custom Title from Gemini',
         message: 'Custom message',
@@ -654,8 +663,9 @@ describe('normalizeInstantResponse integration', () => {
     const result = normalizeInstantResponse(raw, capabilities(), signals, {});
     expect(result.operationalOnboarding).not.toBeNull();
     expect(result.operationalOnboarding.title).toBe('Custom Title from Gemini');
-    expect(result.operationalOnboarding.targetRoute).toBe('/lotePage');
+    expect(result.operationalOnboarding.targetRoute).toBe('/areaCultivoPage');
     expect(result.operationalOnboarding.priority).toBe(30);
+    expect(result.infoRecommendation).toBeNull();
   });
 
   it('sets operationalOnboarding to null when stepId does not match', () => {
@@ -841,6 +851,11 @@ describe('buildEnhancedInstantFallback integration', () => {
     expect(result.operationalOnboarding.title).toBe('Como começar');
     expect(result.operationalOnboarding.steps).toHaveLength(3);
     expect(result.operationalOnboarding.priority).toBe(20);
+    expect(result.operationalOnboarding.targetRoute).toBe('/areaCultivoPage');
+    expect(result.operationalOnboarding.recommendedActions).toBeUndefined();
+    expect(result.infoRecommendation).toBeNull();
+    expect(result.nextStepPrediction.targetRoute).toBe('/lotePage');
+    expect(result.shortcuts.map((shortcut) => shortcut.route)).toEqual(['/protocoloPage', '/areaCultivoPage']);
   });
 
   it('sets operationalOnboarding to null when clientCapabilities lacks the component', () => {
@@ -865,7 +880,7 @@ describe('buildEnhancedInstantFallback integration', () => {
 // ---------------------------------------------------------------------------
 
 describe('finalizeValidInstantResponse integration', () => {
-  const { finalizeValidInstantResponse } = require('../../src/instantResponseValidator');
+  const { finalizeValidInstantResponse, sanitizeFinalInstantResponse } = require('../../src/instantResponseValidator');
   const { normalizeClientCapabilities } = require('../../src/clientCapabilitiesValidator');
 
   function capabilities() {
@@ -891,7 +906,7 @@ describe('finalizeValidInstantResponse integration', () => {
       confidence: 0.6,
       title: 'Criar lote',
       description: 'Crie seu primeiro lote',
-      targetRoute: '/protocoloPage',
+      targetRoute: '/lotePage',
       actionLabel: 'Criar',
     },
     sectionAdaptations: [{
@@ -902,7 +917,11 @@ describe('finalizeValidInstantResponse integration', () => {
       title: 'Test',
       description: 'Test',
     }],
-    shortcuts: [{ route: '/lotePage', confidence: 0.6, label: 'Test', description: '', group: 'primary', reason: 'Test' }],
+    shortcuts: [
+      { route: '/lotePage', confidence: 0.6, label: 'Criar primeiro lote', description: '', group: 'primary', reason: 'Test' },
+      { route: '/protocoloPage', confidence: 0.5, label: 'Protocolo', description: '', group: 'secondary', reason: 'Test' },
+      { route: '/areaCultivoPage', confidence: 0.4, label: 'Área', description: '', group: 'contextual', reason: 'Test' },
+    ],
     focus: { component: 'AdaptiveFocusBanner', message: 'Test', targetSectionId: 'recommended_actions', priority: 'high' },
     uiTreatment: { density: 'comfortable', emphasis: 'moderate', animation: 'subtle', explanationVisibility: 'low', showProgressBar: false },
     reason: 'Test',
@@ -919,7 +938,7 @@ describe('finalizeValidInstantResponse integration', () => {
         message: 'Crie seu primeiro lote',
         steps: ['Cadastre', 'Crie', 'Acompanhe'],
         ctaLabel: 'Criar',
-        targetRoute: '/protocoloPage',
+        targetRoute: '/areaCultivoPage',
         reason: 'Usuário sem lote ativo',
         priority: 20,
       },
@@ -927,7 +946,7 @@ describe('finalizeValidInstantResponse integration', () => {
 
     const signals = {
       stepId: 'create_lot_with_protocol',
-      targetRoute: '/protocoloPage',
+      targetRoute: '/lotePage',
       rulesApplied: ['RULE-001', 'RULE-010'],
     };
 
@@ -935,6 +954,126 @@ describe('finalizeValidInstantResponse integration', () => {
     expect(result.operationalOnboarding).not.toBeNull();
     expect(result.operationalOnboarding.title).toBe('Como começar');
     expect(result.operationalOnboarding.priority).toBe(20);
+    expect(result.operationalOnboarding.recommendedActions).toBeUndefined();
+    expect(result.infoRecommendation).toBeNull();
+    expect(result.nextStepPrediction.targetRoute).toBe('/lotePage');
+    expect(result.shortcuts.map((shortcut) => shortcut.route)).toEqual(['/protocoloPage', '/areaCultivoPage']);
+  });
+
+  it('backfills canonical secondary shortcuts when only the primary create-lot shortcut remains', () => {
+    const response = {
+      ...minimalValidResponse,
+      shortcuts: [
+        { route: '/lotePage', confidence: 0.6, label: 'Criar primeiro lote', description: '', group: 'primary', reason: 'Test' },
+      ],
+      operationalOnboarding: {
+        title: 'Como começar',
+        message: 'Crie seu primeiro lote',
+        steps: ['Cadastre', 'Crie', 'Acompanhe'],
+        ctaLabel: 'Criar',
+        targetRoute: '/areaCultivoPage',
+        reason: 'Usuário sem lote ativo',
+        priority: 20,
+      },
+    };
+
+    const result = finalizeValidInstantResponse(response, capabilities(), {
+      stepId: 'create_lot_with_protocol',
+      targetRoute: '/lotePage',
+      rulesApplied: ['RULE-001', 'RULE-010'],
+    });
+
+    expect(result.infoRecommendation).toBeNull();
+    expect(result.shortcuts.map((shortcut) => shortcut.route)).toEqual(['/protocoloPage', '/areaCultivoPage']);
+    expect(result.shortcuts).toHaveLength(2);
+  });
+
+  it('removes create-lot intent shortcuts by label before canonical backfill', () => {
+    const response = {
+      ...minimalValidResponse,
+      shortcuts: [
+        { route: '/protocoloPage', confidence: 0.6, label: 'Criar primeiro lote', description: '', group: 'secondary', reason: 'Criar primeiro lote' },
+        { route: '/areaCultivoPage', confidence: 0.5, label: 'Área', description: '', group: 'contextual', reason: 'Configurar estrutura' },
+      ],
+      operationalOnboarding: {
+        title: 'Como começar',
+        message: 'Crie seu primeiro lote',
+        steps: ['Cadastre', 'Crie', 'Acompanhe'],
+        ctaLabel: 'Criar',
+        targetRoute: '/areaCultivoPage',
+        reason: 'Usuário sem lote ativo',
+        priority: 20,
+      },
+    };
+
+    const result = finalizeValidInstantResponse(response, capabilities(), {
+      stepId: 'create_lot_with_protocol',
+      targetRoute: '/lotePage',
+      rulesApplied: ['RULE-001', 'RULE-010'],
+    });
+
+    expect(result.shortcuts.map((shortcut) => shortcut.route)).toEqual(['/protocoloPage', '/areaCultivoPage']);
+    expect(result.shortcuts[0].label).toBe('Ver protocolos de cultivo');
+    expect(result.shortcuts[0].reason).not.toContain('Criar primeiro lote');
+  });
+
+  it('rejects final onboarding info slot when targetRoute is not areaCultivoPage', () => {
+    const response = {
+      ...minimalValidResponse,
+      operationalOnboarding: {
+        title: 'Como começar',
+        message: 'Crie seu primeiro lote',
+        steps: ['Cadastre', 'Crie', 'Acompanhe'],
+        ctaLabel: 'Criar',
+        targetRoute: '/areaCultivoPage',
+        reason: 'Usuário sem lote ativo',
+        priority: 20,
+      },
+    };
+    const finalized = finalizeValidInstantResponse(response, capabilities(), {
+      stepId: 'create_lot_with_protocol',
+      targetRoute: '/lotePage',
+      rulesApplied: ['RULE-001', 'RULE-010'],
+    });
+    const invalidCached = {
+      ...finalized,
+      operationalOnboarding: {
+        ...finalized.operationalOnboarding,
+        targetRoute: '/protocoloPage',
+      },
+    };
+
+    expect(sanitizeFinalInstantResponse(invalidCached, capabilities())).toBeNull();
+  });
+
+  it('rejects stale cached final response with bad onboarding target and non-null infoRecommendation', () => {
+    const response = {
+      ...minimalValidResponse,
+      operationalOnboarding: {
+        title: 'Como começar',
+        message: 'Crie seu primeiro lote',
+        steps: ['Cadastre', 'Crie', 'Acompanhe'],
+        ctaLabel: 'Criar',
+        targetRoute: '/areaCultivoPage',
+        reason: 'Usuário sem lote ativo',
+        priority: 20,
+      },
+    };
+    const finalized = finalizeValidInstantResponse(response, capabilities(), {
+      stepId: 'create_lot_with_protocol',
+      targetRoute: '/lotePage',
+      rulesApplied: ['RULE-001', 'RULE-010'],
+    });
+    const invalidCached = {
+      ...finalized,
+      infoRecommendation: minimalValidResponse.infoRecommendation,
+      operationalOnboarding: {
+        ...finalized.operationalOnboarding,
+        targetRoute: '/protocoloPage',
+      },
+    };
+
+    expect(sanitizeFinalInstantResponse(invalidCached, capabilities())).toBeNull();
   });
 
   it('coerces undefined operationalOnboarding to null', () => {

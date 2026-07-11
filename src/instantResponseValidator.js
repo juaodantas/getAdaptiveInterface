@@ -23,6 +23,10 @@ const {
   buildOperationalOnboardingFallback,
   validateOperationalOnboarding,
 } = require('./instantOperationalOnboardingBuilder');
+const {
+  canonicalizeOnboardingSecondaryShortcuts,
+  hasOnboardingInfoSlotTarget,
+} = require('./instantOnboardingInfoSlot');
 
 const UNSAFE_INFO_TEXT_PATTERN = /(?:\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b|@|https?:\/\/|resourceName|cpf|cnpj)/i;
 const FINAL_INSTANT_RESPONSE_KEYS = [
@@ -219,8 +223,14 @@ function validateInstantResponse(response, clientCapabilities) {
   if ((response.uiTreatment?.showProgressBar ?? false) !== false) {
     errors.push('progress_bar_requested');
   }
-  if (response.infoRecommendation) {
+  if (hasCreateLotOperationalOnboarding(response)) {
+    if (!hasValidOnboardingInfoSlotContract(response)) {
+      errors.push('invalid_onboarding_info_slot_contract');
+    }
+  } else if (response.infoRecommendation) {
     validateInfoRecommendation(response.infoRecommendation, clientCapabilities).forEach((error) => errors.push(error));
+  } else if (!hasOperationalOnboardingInfoSlot(response)) {
+    errors.push('missing_info_recommendation');
   }
 
   return { valid: errors.length === 0, errors };
@@ -354,6 +364,10 @@ function sanitizeFinalFallback(value) {
 }
 
 function sanitizeFinalInfoRecommendation(value) {
+  if (value === null) {
+    return null;
+  }
+
   const infoRecommendation = plainObjectOrEmpty(value);
   return {
     type: infoRecommendation.type,
@@ -364,6 +378,26 @@ function sanitizeFinalInfoRecommendation(value) {
     ctaRoute: infoRecommendation.ctaRoute,
     category: infoRecommendation.category,
   };
+}
+
+function hasOperationalOnboardingInfoSlot(response) {
+  return response.nextStepPrediction?.stepId === 'create_lot_with_protocol'
+    && isPlainObject(response.operationalOnboarding)
+    && validateOperationalOnboarding(response.operationalOnboarding).length === 0
+    && hasOnboardingInfoSlotTarget(response.operationalOnboarding);
+}
+
+function hasCreateLotOperationalOnboarding(response) {
+  return response.nextStepPrediction?.stepId === 'create_lot_with_protocol'
+    && response.operationalOnboarding !== null
+    && response.operationalOnboarding !== undefined;
+}
+
+function hasValidOnboardingInfoSlotContract(response) {
+  return isPlainObject(response.operationalOnboarding)
+    && validateOperationalOnboarding(response.operationalOnboarding).length === 0
+    && hasOnboardingInfoSlotTarget(response.operationalOnboarding)
+    && response.infoRecommendation === null;
 }
 
 function sanitizeFinalOperationalOnboarding(value) {
@@ -494,6 +528,10 @@ function hasValidFinalNestedContract(response, clientCapabilities) {
     }
   }
 
+  if (hasCreateLotOperationalOnboarding(response)) {
+    return hasValidOnboardingInfoSlotContract(response);
+  }
+
   return validateInfoRecommendation(response.infoRecommendation, clientCapabilities).length === 0;
 }
 
@@ -514,12 +552,23 @@ function sanitizeFinalInstantResponse(response, clientCapabilities) {
 }
 
 function finalizeValidInstantResponse(response, clientCapabilities, signals) {
-  const infoRecommendation = response.infoRecommendation
-    && validateInfoRecommendation(response.infoRecommendation, clientCapabilities || {}).length === 0
-    ? response.infoRecommendation
-    : buildInfoRecommendationFallback({ signals, clientCapabilities });
+  const capabilities = clientCapabilities || {};
+  const stepId = signals?.stepId || response.nextStepPrediction?.stepId || '';
+  const operationalOnboarding = response.operationalOnboarding || null;
+  const onboardingOwnsInfoSlot = stepId === 'create_lot_with_protocol'
+    && operationalOnboarding
+    && validateOperationalOnboarding(operationalOnboarding).length === 0
+    && hasOnboardingInfoSlotTarget(operationalOnboarding);
+  let infoRecommendation = null;
 
-  const maxShortcuts = Math.max(1, clientCapabilities.maxShortcuts || 3);
+  if (!onboardingOwnsInfoSlot) {
+    infoRecommendation = response.infoRecommendation
+      && validateInfoRecommendation(response.infoRecommendation, capabilities).length === 0
+      ? response.infoRecommendation
+      : buildInfoRecommendationFallback({ signals, clientCapabilities: capabilities });
+  }
+
+  const maxShortcuts = Math.max(1, capabilities.maxShortcuts || 3);
   const normalizedShortcuts = (response.shortcuts || []).slice(0, maxShortcuts).map((sc) => {
     const description = sc.description || sc.reason || '';
     return {
@@ -530,12 +579,16 @@ function finalizeValidInstantResponse(response, clientCapabilities, signals) {
     };
   });
 
-  const stepId = signals?.stepId || response.nextStepPrediction?.stepId || '';
   const resolved = resolveRouteConflicts(
     stepId,
-    response.nextStepPrediction?.targetRoute || infoRecommendation.ctaRoute,
+    response.nextStepPrediction?.targetRoute || infoRecommendation?.ctaRoute,
     infoRecommendation ? infoRecommendation.ctaRoute : null,
     normalizedShortcuts,
+  );
+  const resolvedShortcuts = canonicalizeOnboardingSecondaryShortcuts(
+    stepId,
+    onboardingOwnsInfoSlot ? operationalOnboarding : null,
+    resolved.shortcuts,
   );
 
   return {
@@ -544,7 +597,7 @@ function finalizeValidInstantResponse(response, clientCapabilities, signals) {
       ...response.nextStepPrediction,
       targetRoute: resolved.nextStepRoute,
     },
-    shortcuts: resolved.shortcuts,
+    shortcuts: resolvedShortcuts,
     mode: ADAPTIVE_MODES.INSTANT,
     source: ADAPTIVE_SOURCES.ADAPTIVE,
     visualPriority: VISUAL_PRIORITIES.MODERATE,
@@ -556,7 +609,7 @@ function finalizeValidInstantResponse(response, clientCapabilities, signals) {
     infoRecommendation: resolved.infoCtaRoute && infoRecommendation
       ? { ...infoRecommendation, ctaRoute: resolved.infoCtaRoute }
       : infoRecommendation,
-    operationalOnboarding: response.operationalOnboarding || null,
+    operationalOnboarding,
   };
 }
 

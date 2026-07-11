@@ -15,6 +15,12 @@ const OPERATIONAL_ONBOARDING_FALLBACK = {
   priority: 20,
 };
 
+function resolveOperationalOnboardingTargetRoute(signals) {
+  return signals?.stepId === 'create_lot_with_protocol'
+    ? '/areaCultivoPage'
+    : signals?.targetRoute || '/protocoloPage';
+}
+
 function resolveReason(signals) {
   const rulesApplied = Array.isArray(signals && signals.rulesApplied) ? signals.rulesApplied : [];
   for (const ruleId of rulesApplied) {
@@ -73,7 +79,7 @@ function buildOperationalOnboardingFallback({ signals } = {}) {
 
   return {
     ...OPERATIONAL_ONBOARDING_FALLBACK,
-    targetRoute: signals.targetRoute || '/protocoloPage',
+    targetRoute: resolveOperationalOnboardingTargetRoute(signals),
     reason: resolveReason(signals),
   };
 }
@@ -97,7 +103,7 @@ function normalizeOperationalOnboarding(raw, signals, clientCapabilities) {
       message: raw.message.trim(),
       steps: raw.steps.map((s) => s.trim()),
       ctaLabel: raw.ctaLabel.trim(),
-      targetRoute: raw.targetRoute.trim(),
+      targetRoute: resolveOperationalOnboardingTargetRoute(signals),
       reason: raw.reason.trim(),
       priority: raw.priority,
     };

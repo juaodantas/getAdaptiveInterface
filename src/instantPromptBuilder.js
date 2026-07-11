@@ -107,6 +107,11 @@ function buildInstantPrompt({ navigationContext, sessionNavigations, operational
 
   const agendaState = operationalContext.agendaState || {};
   const maxShortcuts = Math.max(1, clientCapabilities.maxShortcuts || 3);
+  const shouldNullInfoRecommendation = signals.stepId === 'create_lot_with_protocol'
+    && clientCapabilities.supportedComponents.includes('OperationalOnboardingCard');
+  const onboardingInfoRecommendationRule = shouldNullInfoRecommendation
+    ? '- Se stepContext.stepId === "create_lot_with_protocol" e OperationalOnboardingCard estiver suportado, retorne infoRecommendation: null porque operationalOnboarding ocupa o slot do card informativo.'
+    : '- Retorne infoRecommendation válido conforme o schema obrigatório.';
 
   const promptPayload = {
     navigationContext,
@@ -179,6 +184,7 @@ REGRAS:
 - infoRecommendation.type deve usar um dos tipos permitidos.
 - infoRecommendation.ctaRoute deve estar na allowlist da Info.
 - shortcuts[].route deve estar em allowedRoutes.
+${onboardingInfoRecommendationRule}
 
 JSON de contexto sanitizado:
 ${JSON.stringify(promptPayload)}`;
