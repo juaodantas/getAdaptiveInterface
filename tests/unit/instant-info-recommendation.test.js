@@ -310,7 +310,7 @@ describe('INSTANT route recommendation', () => {
     expect(compact.infoCardsState).toBeUndefined();
   });
 
-  test('resolveRouteConflicts ensures unique routes', () => {
+  test('resolveRouteConflicts allows the first shortcut to repeat targetRoute', () => {
     const resolved = resolveRouteConflicts('record_caderno_adjustment', '/cadernoCampoPage', null, [
       { route: '/cadernoCampoPage', label: 'Registrar', group: 'primary' },
       { route: '/agendaPage', label: 'Agenda', group: 'secondary' },
@@ -318,8 +318,8 @@ describe('INSTANT route recommendation', () => {
 
     expect(resolved.nextStepRoute).toBe('/cadernoCampoPage');
     const routes = [resolved.nextStepRoute, ...resolved.shortcuts.map((s) => s.route)];
-    expect(new Set(routes).size).toBe(routes.length);
-    expect(resolved.shortcuts[0].route).not.toBe('/cadernoCampoPage');
+    expect(new Set(routes).size).toBe(routes.length - 1);
+    expect(resolved.shortcuts[0].route).toBe('/cadernoCampoPage');
   });
 
   test('resolveRouteConflicts resolves info ctaRoute conflict', () => {
@@ -328,16 +328,16 @@ describe('INSTANT route recommendation', () => {
     ]);
 
     expect(resolved.infoCtaRoute).not.toBe('/cadernoCampoPage');
-    expect(resolved.infoCtaRoute).toBe('/relatoriosPage');
+    expect(resolved.infoCtaRoute).toBe('/agendaPage');
   });
 
   test('resolveRouteConflicts updates shortcut text when route is remapped', () => {
-    const resolved = resolveRouteConflicts('review_final_home', '/relatoriosPage', '/agendaPage', [
+    const resolved = resolveRouteConflicts('finish_agenda_activities', '/agendaPage', '/agendaPage', [
       {
-        route: '/agendaPage',
-        label: 'Agenda',
-        description: 'Acesse o histórico de atividades',
-        reason: 'Acesse o histórico de atividades',
+        route: '/cadernoCampoPage',
+        label: 'Caderno',
+        description: 'Confira os últimos registros no caderno',
+        reason: 'Confira os últimos registros no caderno',
         confidence: 0.5,
         group: 'secondary',
       },
@@ -345,16 +345,16 @@ describe('INSTANT route recommendation', () => {
 
     expect(resolved.shortcuts).toHaveLength(1);
     expect(resolved.shortcuts[0]).toMatchObject({
-      route: '/solucaoPage',
-      label: 'Ver Solução',
-      description: 'Consulte a solução aplicada ao cultivo.',
-      reason: 'Consulte a solução aplicada ao cultivo.',
+      route: '/lotePage',
+      label: 'Ver Lotes',
+      description: 'Consulte os lotes em produção.',
+      reason: 'Consulte os lotes em produção.',
       confidence: 0.5,
       group: 'secondary',
     });
-    expect(resolved.shortcuts[0].label).not.toContain('Agenda');
-    expect(resolved.shortcuts[0].description).not.toContain('histórico');
-    expect(resolved.shortcuts[0].reason).not.toContain('histórico');
+    expect(resolved.shortcuts[0].label).not.toContain('Caderno');
+    expect(resolved.shortcuts[0].description).not.toContain('caderno');
+    expect(resolved.shortcuts[0].reason).not.toContain('caderno');
   });
 
   test('resolveRouteConflicts preserves shortcut text when route does not change', () => {

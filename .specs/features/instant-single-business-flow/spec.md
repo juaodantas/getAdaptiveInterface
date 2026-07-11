@@ -39,6 +39,9 @@ The current backend mixes business rules with test-sequence mechanics. This crea
 - Correct the Home information surface mapping for the core business steps, including `operationalOnboarding` as the primary card for initial lot/protocol setup when supported.
 - Accept the Phase 1.1 slim frontend payload without requiring legacy-only fields.
 - Normalize cheap and safe legacy aliases at the API boundary while internally preferring the slim normalized field names.
+- Align the next phase with the exact five Home sequence expected by users, including route, FocusBanner, shortcuts, and primary Home info.
+- Allow sanitized `recentUserActions` to aid natural-flow transition decisions without making it required.
+- Preserve critical alerts and overdue tasks as higher-priority interruptions over the natural five-step flow.
 
 ## Non-Goals
 
@@ -49,8 +52,7 @@ The current backend mixes business rules with test-sequence mechanics. This crea
 - No database schema change.
 - No API contract breaking change for current clients.
 - No redesign of unrelated recommendation, metrics, or route distribution behavior.
-- No requirement that `lastAction` or `recentUserActions` exists in the payload.
-- No use of `recentUserActions` as a decisive business-rule input in Phase 1.1.
+- No requirement that `lastAction` or `recentUserActions` exists in the payload, even when `recentUserActions` is used as an optional decision aid in the next phase.
 - No forwarding of free-text `recentUserActions.entityName` values to Gemini.
 
 ## Technical Approach and Design Decisions
@@ -108,6 +110,19 @@ After the frontend starts sending last effective action information:
 - Consider deprecating `testSequenceSignals` at the API documentation level after all active clients stop sending it.
 - Revisit validator structure only if the new contract requires clearer boundaries.
 
+### Next Phase Scope: Natural 5-Home Flow with Optional Recent Action Aid
+
+Backend decisioning should align the natural business flow with the user's expected five Home states. `recentUserActions` may now be used as an optional decision aid to disambiguate transitions, but it must not become required for valid requests or for reaching the flow through equivalent state facts.
+
+Scope updates:
+
+- Keep critical alerts and overdue tasks as higher-priority operational interruptions. They may temporarily supersede the natural five-step flow because they represent urgent work.
+- Use normalized state facts first, with `recentUserActions` as supporting evidence when present.
+- Do not require `recentUserActions`; requests without it must continue to follow the best state-derived business step.
+- Do not allow generic `review_today_tasks` to mask a more specific natural-flow step when recent action/state matches `check_generated_activities`, `record_caderno_adjustment`, `finish_agenda_activities`, or `review_final_home`.
+- Keep `recentUserActions.entityName` out of Gemini prompt content.
+- Align the step target, FocusBanner copy, shortcuts, and Home information type with the exact five-step sequence below.
+
 ### Phase 1.1 Payload Compatibility Scope
 
 Backend-only compatibility update for the new slim frontend payload:
@@ -125,6 +140,7 @@ Backend-only compatibility update for the new slim frontend payload:
   - `speciesInProgressCount`
   - `recentUserActions`
 - Treat `recentUserActions` as optional, sanitized context only. It must not be required and must not be decisive for selecting a business step in Phase 1.1.
+- In the next phase, `recentUserActions` may be used as an optional decision aid for natural-flow disambiguation, while remaining non-required.
 - If `recentUserActions` is included in a Gemini prompt, include only sanitized aggregate/count/type/action/timestamp data. Do not send `entityName` because it can contain PII or domain free text.
 - Continue tolerating removed legacy payload fields when present, but do not require them:
   - `testSequenceSignals`
@@ -154,7 +170,7 @@ Relevant payload fields after Phase 1.1:
 | `operationalContext.cultivationState` | Source for cultivation context signals. Slim fields: `culturesCount`, `speciesInProgressCount`. |
 | `operationalContext.teamState` | Source for team context signals. |
 | `operationalContext.alertState` | Source for critical alert signals. |
-| `operationalContext.recentUserActions` | Optional slim payload array of recent user actions; sanitized at the boundary and non-decisive in Phase 1.1. |
+| `operationalContext.recentUserActions` | Optional slim payload array of recent user actions; sanitized at the boundary, non-decisive in Phase 1.1, and allowed as an optional natural-flow decision aid in the next phase. |
 | Future `lastAction` / last effective action | Not required in Phase 1; optional contract candidate for Phase 2. |
 
 ### Slim Payload Shape
@@ -227,14 +243,16 @@ Removed legacy-only structures must not be required for valid requests. If prese
 
 ### `recentUserActions` Sanitization Contract
 
-`recentUserActions` is optional context for future transition disambiguation. In Phase 1.1:
+`recentUserActions` is optional context for transition disambiguation. In Phase 1.1 it is sanitized context only; in the next phase it may also aid natural-flow step selection when consistent with state facts.
 
 - Validate each item at the API boundary.
 - Keep only bounded, expected primitive fields.
 - Treat `entityId` as optional and avoid including it in Gemini prompts unless there is an explicit non-PII use case.
 - Do not include `entityName` in Gemini prompts.
 - Prompt context, if any, should be reduced to sanitized counts and non-free-text dimensions such as action type, entity type, and timestamp recency.
-- Do not require `recentUserActions` or a separate `lastAction` field for request validity or business-rule selection.
+- Do not require `recentUserActions` or a separate `lastAction` field for request validity.
+- When used as a decision aid, only use sanitized dimensions such as `entityType`, `action`, and timestamp recency.
+- Do not let recent action evidence override higher-priority critical alerts or overdue tasks.
 
 ### Business Step Output Shape
 
@@ -270,25 +288,41 @@ These steps should be selected by normal business facts from the normalized `ope
 | --- | --- | --- | --- | --- |
 | 1 | Critical operational alerts exist | `review_critical_alerts` | `/agendaPage` | `CRITICAL_ALERTS` |
 | 2 | Overdue tasks exist | `resolve_overdue_tasks` | `/agendaPage` | `OVERDUE_TASKS` |
-| 3 | Active protocol/lot context has generated activities seen but no field adjustment recorded | `record_caderno_adjustment` | `/cadernoCampoPage` | `RECORD_CADERNO_ADJUSTMENT` |
-| 4 | Today tasks or next pending task exist | `review_today_tasks` | `/agendaPage` | `TODAY_TASKS` |
-| 5 | Protocol-generated tasks exist for a lot with protocol | `review_protocol_tasks` or `check_generated_activities` depending on whether the intent is review vs first check | `/agendaPage` | `CHECK_GENERATED_ACTIVITIES` |
-| 6 | No lot with protocol exists | `create_lot_with_protocol` | `/protocoloPage` | `NO_PROTOCOL_LOT` |
-| 7 | Lot with protocol exists but generated activities have not been seen | `check_generated_activities` | `/agendaPage` | `CHECK_GENERATED_ACTIVITIES` |
-| 8 | Generated activities have been seen but adjustment is not recorded | `record_caderno_adjustment` | `/cadernoCampoPage` | `RECORD_CADERNO_ADJUSTMENT` |
-| 9 | Adjustment is recorded and agenda activities remain pending | `finish_agenda_activities` | `/agendaPage` | `FINISH_AGENDA_ACTIVITIES` |
-| 10 | Agenda activities are complete and final review is still needed | `review_final_home` | `/relatoriosPage` | `REVIEW_FINAL_HOME` |
-| 11 | Recent field notebook signal exists | `review_field_notes` | `/cadernoCampoPage` | `FIELD_NOTEBOOK` |
-| 12 | Reservoir or nutrient solution attention signal exists | `review_reservoirs` | `/reservatoriosPage` | `RESERVOIR_ATTENTION` |
-| 13 | Production/cultivation context exists | `review_production` | `/relatoriosPage` | `PRODUCTION_CONTEXT` |
-| 14 | Team context exists | `review_team` | `/gerenciarEquipePage` | `TEAM_CONTEXT` |
-| 15 | Default safe onboarding when no stronger signal exists | `create_lot_with_protocol` | `/protocoloPage` | `NO_PROTOCOL_LOT` or `AVOID_EMPTY_PRODUCTION` |
+| 3 | Lot/protocol was just created and generated activities exist | `check_generated_activities` | `/agendaPage` | `CHECK_GENERATED_ACTIVITIES` |
+| 4 | Agenda activity was viewed/edited/opened, or agenda was viewed, and no nutrition adjustment record exists | `record_caderno_adjustment` | `/cadernoCampoPage` | `RECORD_CADERNO_ADJUSTMENT` |
+| 5 | Field note or nutrition adjustment was created and today agenda activities remain pending | `finish_agenda_activities` | `/agendaPage` | `FINISH_AGENDA_ACTIVITIES` |
+| 6 | Agenda activity was completed, or `lastAgendaInteraction` indicates completion | `review_final_home` | `/lotePage` | `REVIEW_FINAL_HOME` |
+| 7 | No lot with protocol exists, or no stronger state/recent-action signal exists | `create_lot_with_protocol` | `/lotePage` | `NO_PROTOCOL_LOT` |
+| 8 | Lot with protocol exists and generated activities exist, but no agenda-check signal exists yet | `check_generated_activities` | `/agendaPage` | `CHECK_GENERATED_ACTIVITIES` |
+| 9 | Generated activities exist or have been checked, but nutrition adjustment is not recorded | `record_caderno_adjustment` | `/cadernoCampoPage` | `RECORD_CADERNO_ADJUSTMENT` |
+| 10 | Nutrition adjustment is recorded and agenda activities remain pending | `finish_agenda_activities` | `/agendaPage` | `FINISH_AGENDA_ACTIVITIES` |
+| 11 | Agenda activities are complete and final review is still needed | `review_final_home` | `/lotePage` | `REVIEW_FINAL_HOME` |
+| 12 | Today tasks or next pending task exist, but they do not match a more specific natural-flow step | `review_today_tasks` | `/agendaPage` | `TODAY_TASKS` |
+| 13 | Recent field notebook signal exists outside the natural-flow adjustment path | `review_field_notes` | `/cadernoCampoPage` | `FIELD_NOTEBOOK` |
+| 14 | Reservoir or nutrient solution attention signal exists | `review_reservoirs` | `/reservatoriosPage` | `RESERVOIR_ATTENTION` |
+| 15 | Production/cultivation context exists | `review_production` | `/relatoriosPage` | `PRODUCTION_CONTEXT` |
+| 16 | Team context exists | `review_team` | `/gerenciarEquipePage` | `TEAM_CONTEXT` |
+| 17 | Default safe onboarding when no stronger signal exists | `create_lot_with_protocol` | `/lotePage` | `NO_PROTOCOL_LOT` or `AVOID_EMPTY_PRODUCTION` |
 
 Notes:
 
 - No terminal `test_complete` step should remain in the single business flow.
 - If a terminal/completed state is needed later, it should receive a non-test domain name such as `review_operational_summary`, but this is not required for Phase 1 unless existing behavior needs a replacement.
 - The final priority order should be implemented in one business-rule function/module to avoid duplicated step definitions.
+- `review_today_tasks` must remain a generic fallback for agenda work and must not mask the specific natural-flow steps when state or sanitized recent action evidence matches them.
+
+### Optional `recentUserActions` Decision Aid Examples
+
+The backend may use the following sanitized recent action patterns as supporting evidence for natural-flow transitions:
+
+| Sanitized recent action/state pattern | Supported natural-flow step |
+| --- | --- |
+| Lot created and generated activities exist | `check_generated_activities` |
+| Agenda activity viewed, edited, or opened; or agenda viewed; and no nutrition adjustment record exists | `record_caderno_adjustment` |
+| Field note or nutrition adjustment created and `agendaState.pendingToday > 0` | `finish_agenda_activities` |
+| Agenda activity completed, or `agendaState.lastAgendaInteraction` indicates completion | `review_final_home` |
+
+These patterns are aids, not hard requirements. Equivalent normalized state facts must still be able to select the same natural-flow step when recent actions are absent.
 
 ## Correct Home Information Mapping Table
 
@@ -296,13 +330,18 @@ Home information surfaces for the natural business flow should align with the de
 
 ### Natural Business Flow
 
-| Step ID | Rule ID | Primary Home surface | `infoRecommendation` behavior | CTA route |
-| --- | --- | --- | --- | --- |
-| `create_lot_with_protocol` | `NO_PROTOCOL_LOT` | `operationalOnboarding` when supported | Compatibility/fallback `basic_tip` only; must not compete visually with `operationalOnboarding` | `/protocoloPage` |
-| `check_generated_activities` | `CHECK_GENERATED_ACTIVITIES` | `infoRecommendation` | `today_cultivation` | `/agendaPage` |
-| `record_caderno_adjustment` | `RECORD_CADERNO_ADJUSTMENT` | `infoRecommendation` | `today_cultivation` | `/cadernoCampoPage` |
-| `finish_agenda_activities` | `FINISH_AGENDA_ACTIVITIES` | `infoRecommendation` | `field_notes_summary` | `/agendaPage` |
-| `review_final_home` | `REVIEW_FINAL_HOME` | `infoRecommendation` | `basic_tip` | `/relatoriosPage` |
+| Sequence | User state | Step ID | Target route | FocusBanner | Shortcuts | Primary Home info |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | Initial home | `create_lot_with_protocol` | `/lotePage` | `Comece criando seu primeiro lote` | [`/lotePage`, `/protocoloPage`, `/areaCultivoPage`] | `operationalOnboarding` primary |
+| 2 | After creating lot/protocol | `check_generated_activities` | `/agendaPage` | `Confira a Agenda antes de seguir.` | [`/agendaPage`, `/lotePage`, `/cadernoCampoPage`] | `today_cultivation` |
+| 3 | After checking agenda | `record_caderno_adjustment` | `/cadernoCampoPage` | `Caderno de campo - Registrar atividade` | [`/cadernoCampoPage`, `/agendaPage`, `/lotePage`] | `today_cultivation` |
+| 4 | After recording field notebook/pulverização | `finish_agenda_activities` | `/agendaPage` | `Concluir na Agenda` | [`/agendaPage`, `/cadernoCampoPage`, `/lotePage`] | `field_notes_summary` |
+| 5 | After completing agenda activities | `review_final_home` | `/lotePage` | `Revisar Agenda - lote segue em acompanhamento` | [`/lotePage`, `/cadernoCampoPage`, `/agendaPage`] | `basic_tip` |
+
+Compatibility notes:
+
+- For `create_lot_with_protocol`, `operationalOnboarding` is the primary visible Home surface. A compatibility/fallback `basic_tip` may still exist, but it must not create an extra competing visible card when `operationalOnboarding` is rendered.
+- Step targets, FocusBanner copy, shortcuts, and info type must match this table exactly for the five natural-flow homes.
 
 ### Other Operational Steps
 
@@ -368,6 +407,7 @@ Boundaries:
 | New slim payload omits arrays/buckets previously used by backend logic. | Normalize slim booleans/counters as the preferred internal source and keep legacy aliases only as fallback inputs. |
 | `recentUserActions.entityName` may contain PII or domain free text. | Sanitize at the boundary and never send `entityName` to Gemini. |
 | Optional recent action context could accidentally become a hidden requirement. | Add validation coverage proving requests without `recentUserActions` and without `lastAction` remain valid. |
+| Generic agenda rules could mask the natural five-step flow. | Keep `review_today_tasks` below specific natural-flow matches and test the recent-action/state examples explicitly. |
 
 ## Acceptance Criteria
 
@@ -387,7 +427,11 @@ Boundaries:
 - Requests without `recentUserActions` parse successfully.
 - Requests without `lastAction` parse successfully.
 - `recentUserActions` entries are normalized/sanitized when present, but do not decide the selected business step in Phase 1.1.
+- In the next phase, sanitized `recentUserActions` may aid natural-flow step selection but are not required.
 - Gemini prompt context does not include `recentUserActions.entityName`.
+- Critical alerts and overdue tasks remain higher-priority interruptions than the natural five-step flow.
+- `review_today_tasks` is selected only when no more specific natural-flow step matches the normalized state or sanitized recent action evidence.
+- The five natural-flow homes match the exact target routes, FocusBanner copy, shortcuts, and primary Home info types listed in the Natural Business Flow table.
 - No source files are deleted in Phase 1.
 - Existing response shape remains compatible for downstream consumers.
 - Tests or validation fixtures cover at least:
@@ -400,7 +444,12 @@ Boundaries:
   - slim payload with `fieldNotebookState.hasRecentNotes`, `hasNutritionAdjustmentRecord`, and `hasSowingNote` is accepted without raw `latestNotes`;
   - slim payload with `cultivationState.culturesCount` and `speciesInProgressCount` is accepted without old cultivation counters;
   - `recentUserActions` with `entityName` is accepted only after sanitization and does not leak `entityName` into prompt content;
-  - payloads that omit both `lastAction` and `recentUserActions` remain valid.
+  - payloads that omit both `lastAction` and `recentUserActions` remain valid;
+  - lot created plus generated activities selects `check_generated_activities` instead of generic `review_today_tasks`;
+  - agenda viewed/opened/edited with no nutrition adjustment record selects `record_caderno_adjustment`;
+  - field note or nutrition adjustment created with `pendingToday > 0` selects `finish_agenda_activities`;
+  - completed agenda activity or completed `lastAgendaInteraction` selects `review_final_home`;
+  - critical alerts and overdue tasks interrupt the natural-flow step when present.
 
 ## Validation Plan
 

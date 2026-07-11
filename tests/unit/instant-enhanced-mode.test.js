@@ -698,7 +698,7 @@ describe('Enhanced INSTANT mode contract', () => {
       const ctx = legacyContext({ lotWithProtocolCreated: false });
       const result = deriveInstantSignals(ctx);
       expect(result.stepId).toBe('create_lot_with_protocol');
-      expect(result.targetRoute).toBe('/protocoloPage');
+      expect(result.targetRoute).toBe('/lotePage');
       expect(result.stepId).not.toMatch(/^test_/);
       expect(result.shortcuts.length).toBe(3);
     });
@@ -729,7 +729,7 @@ describe('Enhanced INSTANT mode contract', () => {
       );
       const result = deriveInstantSignals(ctx);
       expect(result.stepId).toBe('review_final_home');
-      expect(result.targetRoute).toBe('/relatoriosPage');
+      expect(result.targetRoute).toBe('/lotePage');
       expect(result.stepId).not.toMatch(/^test_/);
     });
 
@@ -751,6 +751,129 @@ describe('Enhanced INSTANT mode contract', () => {
       const result = deriveInstantSignals(ctx);
       expect(result.stepId).not.toMatch(/^test_/);
     });
+
+    test('without lot, onboarding beats reservoir infrastructure context', () => {
+      const ctx = normalizeOperationalContext({
+        dashboardState: {
+          hasActiveLots: false,
+          hasProtocolLinkedToLatestLot: false,
+          hasUpcomingHarvests: false,
+        },
+        agendaState: {
+          hasGeneratedActivities: false,
+          pendingToday: 0,
+          overdueCount: 0,
+          hasOverdue: false,
+          hasProtocolTasks: false,
+        },
+        fieldNotebookState: {
+          hasRecentNotes: false,
+          hasNutritionAdjustmentRecord: false,
+          totalRecentNotes: 0,
+          hasSowingNote: false,
+        },
+        productionState: { hasProductionData: false },
+        cultivationState: { culturesCount: 0, speciesInProgressCount: 0 },
+        reservoirState: {
+          hasReservoirs: true,
+          withSolutionCount: 2,
+          withoutSolutionCount: 0,
+          lowLevelCount: 0,
+          criticalLevelCount: 0,
+          currentLevel: 'unknown',
+        },
+        teamState: { activeMembers: 1, onTimeActivities: 0, overdueActivities: 0 },
+        alertState: { hasCriticalAlerts: false, criticalCount: 0 },
+      });
+
+      const result = deriveInstantSignals(ctx);
+      expect(result.stepId).toBe('create_lot_with_protocol');
+      expect(result.targetRoute).toBe('/lotePage');
+      expect(result.rulesApplied).toContain('RULE-001');
+      expect(result.rulesApplied).not.toContain('RULE-013');
+    });
+
+    test('natural flow step 1 matches initial home expectations', () => {
+      const ctx = normalizeOperationalContext({
+        dashboardState: { hasActiveLots: false, hasProtocolLinkedToLatestLot: false },
+        agendaState: { hasGeneratedActivities: false, pendingToday: 0 },
+      });
+
+      const result = deriveInstantSignals(ctx);
+      expect(result).toMatchObject({
+        stepId: 'create_lot_with_protocol',
+        targetRoute: '/lotePage',
+        focusMessage: 'Comece criando seu primeiro lote',
+      });
+      expect(result.shortcuts.map((shortcut) => shortcut.route)).toEqual(['/lotePage', '/protocoloPage', '/areaCultivoPage']);
+    });
+
+    test('natural flow step 2 uses recent lot creation to recommend agenda', () => {
+      const ctx = normalizeOperationalContext({
+        dashboardState: { hasActiveLots: true, hasProtocolLinkedToLatestLot: true },
+        agendaState: { hasGeneratedActivities: true, pendingToday: 0 },
+        recentUserActions: [{ entityType: 'lot', action: 'created', timestamp: '2026-07-10T15:10:00.000Z' }],
+      });
+
+      const result = deriveInstantSignals(ctx);
+      expect(result).toMatchObject({
+        stepId: 'check_generated_activities',
+        targetRoute: '/agendaPage',
+        focusMessage: 'Confira a Agenda antes de seguir.',
+      });
+      expect(result.shortcuts.map((shortcut) => shortcut.route)).toEqual(['/agendaPage', '/lotePage', '/cadernoCampoPage']);
+    });
+
+    test('natural flow step 3 uses recent agenda check to recommend caderno', () => {
+      const ctx = normalizeOperationalContext({
+        dashboardState: { hasActiveLots: true, hasProtocolLinkedToLatestLot: true },
+        agendaState: { hasGeneratedActivities: true, pendingToday: 2 },
+        fieldNotebookState: { hasNutritionAdjustmentRecord: false },
+        recentUserActions: [{ entityType: 'agenda_activity', action: 'viewed', timestamp: '2026-07-10T15:13:59.000Z' }],
+      });
+
+      const result = deriveInstantSignals(ctx);
+      expect(result).toMatchObject({
+        stepId: 'record_caderno_adjustment',
+        targetRoute: '/cadernoCampoPage',
+        focusMessage: 'Caderno de campo - Registrar atividade',
+      });
+      expect(result.shortcuts.map((shortcut) => shortcut.route)).toEqual(['/cadernoCampoPage', '/agendaPage', '/lotePage']);
+    });
+
+    test('natural flow step 4 uses recent field record to recommend finishing agenda', () => {
+      const ctx = normalizeOperationalContext({
+        dashboardState: { hasActiveLots: true, hasProtocolLinkedToLatestLot: true },
+        agendaState: { hasGeneratedActivities: true, pendingToday: 2 },
+        fieldNotebookState: { hasNutritionAdjustmentRecord: true },
+        recentUserActions: [{ entityType: 'field_note', action: 'created', timestamp: '2026-07-10T15:13:59.000Z' }],
+      });
+
+      const result = deriveInstantSignals(ctx);
+      expect(result).toMatchObject({
+        stepId: 'finish_agenda_activities',
+        targetRoute: '/agendaPage',
+        focusMessage: 'Concluir na Agenda',
+      });
+      expect(result.shortcuts.map((shortcut) => shortcut.route)).toEqual(['/agendaPage', '/cadernoCampoPage', '/lotePage']);
+    });
+
+    test('natural flow step 5 uses recent agenda completion to recommend lot review', () => {
+      const ctx = normalizeOperationalContext({
+        dashboardState: { hasActiveLots: true, hasProtocolLinkedToLatestLot: true },
+        agendaState: { hasGeneratedActivities: true, pendingToday: 0, lastAgendaInteraction: 'completed' },
+        fieldNotebookState: { hasNutritionAdjustmentRecord: true },
+        recentUserActions: [{ entityType: 'agenda_activity', action: 'completed', timestamp: '2026-07-10T15:13:59.000Z' }],
+      });
+
+      const result = deriveInstantSignals(ctx);
+      expect(result).toMatchObject({
+        stepId: 'review_final_home',
+        targetRoute: '/lotePage',
+        focusMessage: 'Revisar Agenda - lote segue em acompanhamento',
+      });
+      expect(result.shortcuts.map((shortcut) => shortcut.route)).toEqual(['/lotePage', '/cadernoCampoPage', '/agendaPage']);
+    });
   });
 
   describe('resolveRouteConflicts', () => {
@@ -770,7 +893,7 @@ describe('Enhanced INSTANT mode contract', () => {
       expect(result.shortcuts[0].route).toBe(result.nextStepRoute);
     });
 
-    test('non-test step rejects duplicate first shortcut', () => {
+    test('first shortcut can repeat targetRoute in the natural flow', () => {
       const result = resolveRouteConflicts(
         'check_generated_activities',
         '/agendaPage',
@@ -781,8 +904,7 @@ describe('Enhanced INSTANT mode contract', () => {
         ],
       );
       expect(result.shortcuts.length).toBe(2);
-      // Without Opção B, duplicate first shortcut would be resolved away
-      expect(result.shortcuts[0].route).not.toBe(result.nextStepRoute);
+      expect(result.shortcuts[0].route).toBe(result.nextStepRoute);
     });
   });
 });

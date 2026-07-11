@@ -11,29 +11,29 @@ const { buildOperationalOnboardingFallback } = require('./instantOperationalOnbo
 
 const STEP_COPY = {
   create_lot_with_protocol: {
-    title: 'Cadastre um lote com protocolo',
-    description: 'Comece vinculando um protocolo ao lote para gerar as primeiras atividades.',
-    actionLabel: 'Abrir Protocolos',
+    title: 'Comece criando seu primeiro lote',
+    description: 'Crie o primeiro lote com protocolo para iniciar o acompanhamento.',
+    actionLabel: 'Criar primeiro lote',
   },
   check_generated_activities: {
-    title: 'Verifique as atividades geradas na Agenda',
+    title: 'Confira a Agenda antes de seguir.',
     description: 'O lote com protocolo já foi criado. Confira as atividades geradas para o primeiro dia.',
     actionLabel: 'Abrir Agenda',
   },
   record_caderno_adjustment: {
-    title: 'Registre o ajuste no Caderno de Campo',
+    title: 'Caderno de campo - Registrar atividade',
     description: 'As atividades foram verificadas. Agora registre a execução do ajuste no caderno de campo.',
     actionLabel: 'Abrir Caderno',
   },
   finish_agenda_activities: {
-    title: 'Conclua as pendências na Agenda',
+    title: 'Concluir na Agenda',
     description: 'O ajuste foi registrado. Finalize as atividades do primeiro dia na Agenda.',
     actionLabel: 'Abrir Agenda',
   },
   review_final_home: {
-    title: 'Confira o resumo final do fluxo',
-    description: 'Todas as atividades foram concluídas. Revise o resumo final pela Home.',
-    actionLabel: 'Ver Relatórios',
+    title: 'Revisar Agenda - lote segue em acompanhamento',
+    description: 'Todas as atividades foram concluídas. Revise o lote em acompanhamento.',
+    actionLabel: 'Ver Lote',
   },
   review_critical_alerts: {
     title: 'Revise alertas operacionais críticos',
@@ -131,7 +131,7 @@ function buildEnhancedInstantFallback({ operationalContext, clientCapabilities, 
     shortcuts: resolved.shortcuts,
     focus: {
       component: 'AdaptiveFocusBanner',
-      message: `Próximo foco: ${copy.title}.`,
+      message: signals.focusMessage || copy.title,
       targetSectionId: 'recommended_actions',
       priority: 'high',
     },
