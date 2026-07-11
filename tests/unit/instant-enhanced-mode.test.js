@@ -134,7 +134,7 @@ describe('Enhanced INSTANT mode contract', () => {
     expect(prompt).toContain('nextStepPrediction');
     expect(prompt).toContain('infoRecommendation');
     expect(prompt).toContain('shortcuts');
-    expect(prompt).toContain('Todos os shortcuts DEVEM ter rotas diferentes');
+    expect(prompt).toContain('shortcuts[0] é a ação principal (PODE ter a mesma rota');
     expect(prompt).toContain('Retorne infoRecommendation válido');
     expect(prompt).not.toContain('Maria');
     expect(prompt).not.toContain('CPF 123');
@@ -913,7 +913,7 @@ describe('Enhanced INSTANT mode contract', () => {
       expect(result.shortcuts[0].route).toBe(result.nextStepRoute);
     });
 
-    test('first shortcut can repeat targetRoute in the natural flow', () => {
+    test('first shortcut repeats targetRoute by design (Opção E — frontend deduplica)', () => {
       const result = resolveRouteConflicts(
         'check_generated_activities',
         '/agendaPage',
@@ -924,7 +924,8 @@ describe('Enhanced INSTANT mode contract', () => {
         ],
       );
       expect(result.shortcuts.length).toBe(2);
-      expect(result.shortcuts[0].route).not.toBe(result.nextStepRoute);
+      // Opção E: shortcut[0] NÃO é remapeado — pode repetir targetRoute
+      expect(result.shortcuts[0].route).toBe(result.nextStepRoute);
     });
   });
 });

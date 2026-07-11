@@ -106,6 +106,28 @@ async function writeInstantMetric({ db, admin, event, userId, sessionId, signals
     return;
   }
   try {
+    // Look up experiment group config for this user (fire-and-forget read; caller
+    // does not await this function, so latency is absorbed here without affecting
+    // the INSTANT response path).
+    let experimentId = null;
+    let testGroup = null;
+    let participantId = null;
+    let period = null;
+    if (userId) {
+      try {
+        const configDoc = await db.collection('userAdaptiveConfig').doc(String(userId)).get();
+        if (configDoc.exists) {
+          const config = configDoc.data();
+          experimentId = config.experimentId || null;
+          testGroup = config.testGroup || null;
+          participantId = config.participantId || null;
+          period = config.period || null;
+        }
+      } catch {
+        // Config lookup failure must not block the metric write.
+      }
+    }
+
     await db.collection('instantMetrics').add({
       event,
       userId: userId || null,
@@ -114,6 +136,10 @@ async function writeInstantMetric({ db, admin, event, userId, sessionId, signals
       confidence: typeof recommendation?.confidence === 'number' ? recommendation.confidence : null,
       fallbackUsed: recommendation?.fallback?.used === true,
       cachePolicy,
+      experimentId,
+      testGroup,
+      participantId,
+      period,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
   } catch {

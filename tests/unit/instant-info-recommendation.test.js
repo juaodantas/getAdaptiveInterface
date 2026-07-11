@@ -102,7 +102,7 @@ describe('INSTANT route recommendation', () => {
     expect(prompt).toContain('nextStepPrediction');
     expect(prompt).toContain('infoRecommendation');
     expect(prompt).toContain('shortcuts');
-    expect(prompt).toContain('Todos os shortcuts DEVEM ter rotas diferentes');
+    expect(prompt).toContain('shortcuts[0] é a ação principal (PODE ter a mesma rota');
     expect(prompt).toContain('currentActivityContext');
     expect(prompt).toContain('nextActivity');
     expect(prompt).not.toContain('CPF');
@@ -319,16 +319,17 @@ describe('INSTANT route recommendation', () => {
     expect(compact.infoCardsState).toBeUndefined();
   });
 
-  test('resolveRouteConflicts remaps first shortcut when it conflicts with targetRoute', () => {
+  test('resolveRouteConflicts keeps first shortcut when it repeats targetRoute (Opção E)', () => {
     const resolved = resolveRouteConflicts('record_caderno_adjustment', '/cadernoCampoPage', null, [
       { route: '/cadernoCampoPage', label: 'Registrar', group: 'primary' },
       { route: '/agendaPage', label: 'Agenda', group: 'secondary' },
     ]);
 
     expect(resolved.nextStepRoute).toBe('/cadernoCampoPage');
-    const routes = [resolved.nextStepRoute, ...resolved.shortcuts.map((s) => s.route)];
-    expect(new Set(routes).size).toBe(routes.length);
-    expect(resolved.shortcuts[0].route).not.toBe('/cadernoCampoPage');
+    // Opção E: shortcut[0] pode repetir targetRoute (frontend usa como NextStepCard)
+    expect(resolved.shortcuts[0].route).toBe('/cadernoCampoPage');
+    // shortcut[1] mantido (sem infoCta para conflitar, nextStepRoute fora de usedRoutes)
+    expect(resolved.shortcuts[1].route).toBe('/agendaPage');
   });
 
   test('resolveRouteConflicts resolves info ctaRoute conflict', () => {
@@ -440,7 +441,7 @@ describe('INSTANT route recommendation', () => {
     expect(result.mode).toBe('INSTANT');
     expect(result.fallback.used).toBe(false);
     const routes = [result.nextStepPrediction.targetRoute, result.infoRecommendation.ctaRoute, ...result.shortcuts.map((s) => s.route)];
-    // Opção B: shortcut[0] pode repetir targetRoute; infoCtaRoute pode repetir se resolver não tiver alternativa
+    // Opção E: shortcut[0] pode repetir targetRoute (frontend usa como NextStepCard); infoCtaRoute pode repetir se resolver não tiver alternativa
     expect(routes.length).toBeGreaterThanOrEqual(3);
     expect(result.nextStepPrediction.targetRoute).toBe('/cadernoCampoPage');
   });

@@ -260,7 +260,9 @@ function resolveRouteConflicts(stepId, nextStepRoute, infoCtaRoute, shortcuts) {
     ? (resolver ? (resolver[infoCtaRoute] || infoCtaRoute) : infoCtaRoute)
     : infoCtaRoute;
   if (resolvedInfoCta) usedRoutes.add(resolvedInfoCta);
-  if (nextStepRoute) usedRoutes.add(nextStepRoute);
+  // Opção E: nextStepRoute não entra em usedRoutes.
+  // shortcut[0] pode repetir targetRoute sem ser remapeado.
+  // O frontend usa shortcuts[0] como NextStepCard.
 
   const resolvedShortcuts = (shortcuts || []).map((sc) => {
     if (!sc || !sc.route) return sc;

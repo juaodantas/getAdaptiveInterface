@@ -155,9 +155,9 @@ Rotas permitidas são somente as listadas em allowedRoutes.
 Componentes permitidos são somente os suportados pelo cliente e não proibidos.
 
 REGRAS DE ROTAS:
-- Todos os shortcuts DEVEM ter rotas diferentes entre si e diferentes de targetRoute.
-- infoRecommendation.ctaRoute DEVE ser diferente de targetRoute.
-- infoRecommendation.ctaRoute DEVE ser diferente de targetRoute e do primeiro shortcut.
+- shortcuts[0] é a ação principal (PODE ter a mesma rota de nextStepPrediction.targetRoute).
+- shortcuts[1..N] DEVEM ter rotas diferentes entre si e de shortcuts[0].
+- infoRecommendation.ctaRoute DEVE ser diferente de nextStepPrediction.targetRoute.
 
 Contexto técnico da próxima atividade disponível em currentActivityContext.
 Use apenas tipo, status, prazo e flags; não invente nem repita nomes de entidades.
@@ -179,8 +179,8 @@ Retorne APENAS JSON válido, sem markdown, seguindo o schema obrigatório:
 
 REGRAS:
 - nextStepPrediction.targetRoute deve ser a rota MAIS importante para o passo atual.
-- infoRecommendation.ctaRoute DEVE ser diferente de targetRoute e do primeiro shortcut.
-- shortcuts deve respeitar clientCapabilities.maxShortcuts. Todos os shortcuts DEVEM ter rotas diferentes entre si e diferentes de targetRoute.
+- infoRecommendation.ctaRoute DEVE ser diferente de nextStepPrediction.targetRoute.
+- shortcuts deve respeitar clientCapabilities.maxShortcuts. shortcuts[0] é a ação principal (PODE repetir targetRoute). shortcuts[1..N] DEVEM ter rotas únicas entre si e diferentes de shortcuts[0].
 - infoRecommendation.type deve usar um dos tipos permitidos.
 - infoRecommendation.ctaRoute deve estar na allowlist da Info.
 - shortcuts[].route deve estar em allowedRoutes.
