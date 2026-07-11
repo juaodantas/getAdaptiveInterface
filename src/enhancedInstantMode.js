@@ -101,6 +101,26 @@ async function writeInstantCache({ instantRecommendationCache, lookup, recommend
   }
 }
 
+async function writeInstantMetric({ db, admin, event, userId, sessionId, signals, recommendation, cachePolicy = null }) {
+  if (!db || !admin) {
+    return;
+  }
+  try {
+    await db.collection('instantMetrics').add({
+      event,
+      userId: userId || null,
+      sessionId: sessionId || null,
+      stepId: signals?.stepId || null,
+      confidence: typeof recommendation?.confidence === 'number' ? recommendation.confidence : null,
+      fallbackUsed: recommendation?.fallback?.used === true,
+      cachePolicy,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch {
+    // Fire-and-forget — metrics must never affect the INSTANT response path.
+  }
+}
+
 async function buildEnhancedInstantRecommendation({
   data,
   sessionNavigations,
@@ -108,6 +128,8 @@ async function buildEnhancedInstantRecommendation({
   geminiGenerateText = generateGeminiText,
   instantRecommendationCache = null,
   cacheEventReporter = null,
+  firestoreDb = null,
+  firebaseAdmin = null,
 }) {
   const operationalContext = normalizeOperationalContext(data.operationalContext);
   const clientCapabilities = normalizeClientCapabilities(data.clientCapabilities);
@@ -125,6 +147,16 @@ async function buildEnhancedInstantRecommendation({
   });
 
   if (cachedRecommendation) {
+    writeInstantMetric({
+      db: firestoreDb,
+      admin: firebaseAdmin,
+      event: 'cache_hit',
+      userId: data.userId,
+      sessionId: data.sessionId,
+      signals,
+      recommendation: cachedRecommendation,
+      cachePolicy: cacheLookup?.reason || null,
+    });
     return cachedRecommendation;
   }
 
@@ -142,20 +174,40 @@ async function buildEnhancedInstantRecommendation({
     const rawValidation = validateRawInstantResponse(parsed, clientCapabilities);
 
     if (!rawValidation.valid) {
-      return buildEnhancedInstantFallback({
+      const fallback = buildEnhancedInstantFallback({
         ...fallbackInput,
         reason: `gemini_invalid_response:${rawValidation.errors.join(',')}`,
       });
+      writeInstantMetric({
+        db: firestoreDb,
+        admin: firebaseAdmin,
+        event: 'gemini_fallback',
+        userId: data.userId,
+        sessionId: data.sessionId,
+        signals,
+        recommendation: fallback,
+      });
+      return fallback;
     }
 
     const normalized = normalizeInstantResponse(parsed, clientCapabilities, signals, operationalContext);
     const validation = validateInstantResponse(normalized, clientCapabilities);
 
     if (!validation.valid) {
-      return buildEnhancedInstantFallback({
+      const fallback = buildEnhancedInstantFallback({
         ...fallbackInput,
         reason: `gemini_invalid_response:${validation.errors.join(',')}`,
       });
+      writeInstantMetric({
+        db: firestoreDb,
+        admin: firebaseAdmin,
+        event: 'gemini_fallback',
+        userId: data.userId,
+        sessionId: data.sessionId,
+        signals,
+        recommendation: fallback,
+      });
+      return fallback;
     }
 
     const finalized = finalizeValidInstantResponse(normalized, clientCapabilities, signals);
@@ -165,13 +217,32 @@ async function buildEnhancedInstantRecommendation({
       recommendation: finalized,
       cacheEventReporter,
     });
+    writeInstantMetric({
+      db: firestoreDb,
+      admin: firebaseAdmin,
+      event: 'gemini_success',
+      userId: data.userId,
+      sessionId: data.sessionId,
+      signals,
+      recommendation: finalized,
+    });
     return finalized;
   } catch (error) {
-    return buildEnhancedInstantFallback({
+    const fallback = buildEnhancedInstantFallback({
       ...fallbackInput,
       reason: error.message === 'gemini_timeout' ? 'gemini_timeout' : 'gemini_error',
     });
+    writeInstantMetric({
+      db: firestoreDb,
+      admin: firebaseAdmin,
+      event: 'gemini_error',
+      userId: data.userId,
+      sessionId: data.sessionId,
+      signals,
+      recommendation: fallback,
+    });
+    return fallback;
   }
 }
 
-module.exports = { buildEnhancedInstantRecommendation };
+module.exports = { buildEnhancedInstantRecommendation, writeInstantMetric };

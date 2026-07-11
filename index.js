@@ -16,7 +16,7 @@ const {
   hasValidCardType,
 } = require('./src/adaptiveContract');
 const { resolveRequestSessionId } = require('./src/sessionContext');
-const { buildEnhancedInstantRecommendation } = require('./src/enhancedInstantMode');
+const { buildEnhancedInstantRecommendation, writeInstantMetric } = require('./src/enhancedInstantMode');
 const { createInstantRecommendationCacheFirestoreAdapter } = require('./src/instantRecommendationCacheFirestoreAdapter');
 const { getSupportedMetricEventsSqlList } = require('./src/adaptiveMetrics');
 const experimentalGroups = require('./src/experimentalGroups');
@@ -807,6 +807,8 @@ exports.getAdaptiveInterface = onCall(async (request) => {
           geminiApiKey: GEMINI_API_KEY,
           instantRecommendationCache,
           cacheEventReporter: reportInstantCacheEvent,
+          firestoreDb: db,
+          firebaseAdmin: admin,
         });
       } catch (error) {
         console.error(`[CF] INSTANT: Erro ao processar sessão:`, error.message);
@@ -819,6 +821,8 @@ exports.getAdaptiveInterface = onCall(async (request) => {
           },
           instantRecommendationCache,
           cacheEventReporter: reportInstantCacheEvent,
+          firestoreDb: db,
+          firebaseAdmin: admin,
         });
       }
 
