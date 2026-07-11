@@ -56,6 +56,10 @@ function isAllowedRoute(route) {
   return ALLOWED_INSTANT_ROUTES.includes(route);
 }
 
+function isTestStepId(stepId) {
+  return typeof stepId === 'string' && stepId.startsWith('test_');
+}
+
 function isForbiddenComponent(component, clientCapabilities) {
   return FORBIDDEN_COMPONENTS.includes(component)
     || clientCapabilities.forbiddenComponents.includes(component)
@@ -143,6 +147,9 @@ function validateRawInstantResponse(response, clientCapabilities) {
   if (response.nextStepPrediction?.targetRoute && !isAllowedRoute(response.nextStepPrediction.targetRoute)) {
     errors.push('invalid_next_step_route');
   }
+  if (isTestStepId(response.nextStepPrediction?.stepId)) {
+    errors.push('invalid_test_step_id');
+  }
   if (Array.isArray(response.shortcuts)) {
     response.shortcuts.forEach((shortcut) => {
       if (shortcut?.route && !isAllowedRoute(shortcut.route)) errors.push('invalid_shortcut_route');
@@ -175,6 +182,9 @@ function validateInstantResponse(response, clientCapabilities) {
 
   if (!response.nextStepPrediction?.stepId || !response.nextStepPrediction?.targetRoute) {
     errors.push('missing_next_step');
+  }
+  if (isTestStepId(response.nextStepPrediction?.stepId)) {
+    errors.push('invalid_test_step_id');
   }
   if (!isAllowedRoute(response.nextStepPrediction?.targetRoute)) {
     errors.push('invalid_next_step_route');
@@ -409,6 +419,7 @@ function hasValidFinalNestedContract(response, clientCapabilities) {
   const nextStep = response.nextStepPrediction;
   if (!isPlainObject(nextStep)
     || !isString(nextStep.stepId)
+    || isTestStepId(nextStep.stepId)
     || !isNumberInRange(nextStep.confidence)
     || !isString(nextStep.title)
     || !isString(nextStep.description)

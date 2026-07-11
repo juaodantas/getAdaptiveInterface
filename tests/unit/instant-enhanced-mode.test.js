@@ -1,7 +1,7 @@
 const { buildInstantPrompt } = require('../../src/instantPromptBuilder');
 const { normalizeOperationalContext } = require('../../src/operationalContextValidator');
 const { normalizeClientCapabilities } = require('../../src/clientCapabilitiesValidator');
-const { deriveInstantSignals, resolveTestSequenceStep, TEST_SEQUENCE_STEPS } = require('../../src/instantDomainRules');
+const { deriveInstantSignals } = require('../../src/instantDomainRules');
 const { buildEnhancedInstantFallback } = require('../../src/instantFallbackBuilder');
 const { parseGeminiJson, normalizeInstantResponse } = require('../../src/instantResponseNormalizer');
 const { validateRawInstantResponse, validateInstantResponse, finalizeValidInstantResponse } = require('../../src/instantResponseValidator');
@@ -78,11 +78,11 @@ function geminiResponse(overrides = {}) {
     reasonDetails: { summary: 'Contexto.', details: ['RULE-003'], display: 'info_icon' },
     rulesApplied: ['RULE-003'],
     infoRecommendation: {
-      type: 'field_notes_summary',
+      type: 'today_cultivation',
       source: 'isis',
       priority: 'high',
-      title: 'Resumo do caderno',
-      reason: 'Registros recentes.',
+      title: 'Cultivo de hoje',
+      reason: 'Há uma ação de cultivo para priorizar agora.',
       ctaRoute: '/relatoriosPage',
       category: 'caderno_campo',
     },
@@ -241,6 +241,31 @@ describe('Enhanced INSTANT mode contract', () => {
 
     expect(validation.valid).toBe(false);
     expect(validation.errors).toContain('unsupported_focus_component');
+  });
+
+  test('Gemini response with test step id falls back deterministically', async () => {
+    const signals = deriveInstantSignals(cadernoContext());
+    const normalized = normalizeInstantResponse(geminiResponse({
+      nextStepPrediction: { ...geminiResponse().nextStepPrediction, stepId: 'test_check_generated_activities' },
+    }), validCapabilities(), signals, cadernoContext());
+
+    expect(validateInstantResponse(normalized, validCapabilities())).toEqual({
+      valid: false,
+      errors: ['invalid_test_step_id'],
+    });
+
+    const response = await buildEnhancedInstantRecommendation({
+      data: { operationalContext: cadernoContext(), clientCapabilities: validCapabilities() },
+      sessionNavigations: [],
+      geminiApiKey: 'fake',
+      geminiGenerateText: async () => JSON.stringify(geminiResponse({
+        nextStepPrediction: { ...geminiResponse().nextStepPrediction, stepId: 'test_check_generated_activities' },
+      })),
+    });
+
+    expect(response.fallback.used).toBe(true);
+    expect(response.fallback.reason).toContain('invalid_test_step_id');
+    expect(response.nextStepPrediction.stepId).not.toMatch(/^test_/);
   });
 
   test('valid Gemini response becomes adaptive with unique routes', async () => {
@@ -440,6 +465,40 @@ describe('Enhanced INSTANT mode contract', () => {
     expect(events.map((event) => event.event)).not.toContain('instant_cache_hit');
   });
 
+  test('cached recommendation with test step id is not used and falls through to Gemini', async () => {
+    const ctx = cadernoContext();
+    const caps = validCapabilities();
+    const entry = cacheEntryFor(ctx, caps);
+    entry.recommendation = {
+      ...entry.recommendation,
+      nextStepPrediction: {
+        ...entry.recommendation.nextStepPrediction,
+        stepId: 'test_check_generated_activities',
+      },
+    };
+    const geminiGenerateText = jest.fn(async () => JSON.stringify(geminiResponse()));
+    const events = [];
+
+    const response = await buildEnhancedInstantRecommendation({
+      data: { operationalContext: ctx, clientCapabilities: caps },
+      sessionNavigations: [],
+      geminiApiKey: 'fake',
+      geminiGenerateText,
+      instantRecommendationCache: {
+        get: jest.fn(async () => ({ ok: true, entry })),
+        markHit: jest.fn(),
+        set: jest.fn(async () => ({ ok: true })),
+      },
+      cacheEventReporter: (event) => events.push(event),
+    });
+
+    expect(response.fallback.used).toBe(false);
+    expect(response.nextStepPrediction.stepId).not.toMatch(/^test_/);
+    expect(geminiGenerateText).toHaveBeenCalledTimes(1);
+    expect(events).toContainEqual(expect.objectContaining({ event: 'instant_cache_miss', cachePolicyReason: 'invalid_entry' }));
+    expect(events.map((event) => event.event)).not.toContain('instant_cache_hit');
+  });
+
   test('cached recommendation with invalid nested scalar is not used and falls through to Gemini', async () => {
     const ctx = cadernoContext();
     const caps = validCapabilities();
@@ -625,87 +684,62 @@ describe('Enhanced INSTANT mode contract', () => {
     expect(ENHANCED_INSTANT_METRIC_EVENTS).toContain('instant_adaptation_applied');
   });
 
-  describe('Test sequence priority — Priority 0 in deriveInstantSignals', () => {
-    function testContext(signals = {}, overrides = {}) {
-      // lastRelevantEvent não-nulo indica experimento ativo para Priority 0
-      const baseSignals = { ...signals };
-      if (!baseSignals.lastRelevantEvent && !baseSignals.lotWithProtocolCreated && !baseSignals.generatedActivitiesSeen) {
-        baseSignals.lastRelevantEvent = 'initial';
-      }
+  describe('Legacy testSequenceSignals compatibility', () => {
+    function legacyContext(signals = {}, overrides = {}) {
       return normalizeOperationalContext({
         dashboardState: { hasActiveLots: false, hasProtocolLinkedToLatestLot: false },
         agendaState: { hasGeneratedActivities: false, pendingActivitiesTodayCount: 0, overdueActivitiesCount: 0 },
-        testSequenceSignals: baseSignals,
+        testSequenceSignals: { lastRelevantEvent: 'initial', ...signals },
         ...overrides,
       });
     }
 
-    test('step 1: no lotWithProtocolCreated → test_create_lot_with_protocol', () => {
-      const ctx = testContext({ lotWithProtocolCreated: false });
+    test('legacy testSequenceSignals do not produce test step ids', () => {
+      const ctx = legacyContext({ lotWithProtocolCreated: false });
       const result = deriveInstantSignals(ctx);
-      expect(result.stepId).toBe('test_create_lot_with_protocol');
-      expect(result.targetRoute).toBe('/lotePage');
-      expect(result.focusMessage).toBe('Comece criando seu primeiro lote');
+      expect(result.stepId).toBe('create_lot_with_protocol');
+      expect(result.targetRoute).toBe('/protocoloPage');
+      expect(result.stepId).not.toMatch(/^test_/);
       expect(result.shortcuts.length).toBe(3);
     });
 
-    test('step 2: lotWithProtocolCreated, agenda not seen → test_check_generated_activities', () => {
-      const ctx = testContext({ lotWithProtocolCreated: true, generatedActivitiesSeen: false });
+    test('generated activities seen without adjustment maps to caderno business step', () => {
+      const ctx = legacyContext(
+        { lotWithProtocolCreated: false, generatedActivitiesSeen: false },
+        {
+          dashboardState: { hasActiveLots: true, hasProtocolLinkedToLatestLot: true },
+          agendaState: { hasGeneratedActivities: true, pendingActivitiesTodayCount: 0, overdueActivitiesCount: 0 },
+          fieldNotebookState: { hasRecentFieldNotes: false, hasRecentNutritionAdjustmentRecord: false },
+        },
+      );
       const result = deriveInstantSignals(ctx);
-      expect(result.stepId).toBe('test_check_generated_activities');
-      expect(result.targetRoute).toBe('/agendaPage');
-      expect(result.focusMessage).toBe('Confira a Agenda antes de seguir.');
-    });
-
-    test('step 3: activities seen, adjustment not recorded → test_record_adjustment', () => {
-      const ctx = testContext({ lotWithProtocolCreated: true, generatedActivitiesSeen: true, adjustmentRecorded: false });
-      const result = deriveInstantSignals(ctx);
-      expect(result.stepId).toBe('test_record_adjustment');
+      expect(result.stepId).toBe('record_caderno_adjustment');
       expect(result.targetRoute).toBe('/cadernoCampoPage');
-      expect(result.focusMessage).toBe('Caderno de campo - Registrar atividade');
+      expect(result.stepId).not.toMatch(/^test_/);
     });
 
-    test('step 4: adjustment recorded, agenda not completed → test_finish_agenda', () => {
-      const ctx = testContext({
-        lotWithProtocolCreated: true, generatedActivitiesSeen: true,
-        adjustmentRecorded: true, agendaActivitiesCompleted: false,
-      });
+    test('completed agenda state maps to review_final_home without terminal test step', () => {
+      const ctx = legacyContext(
+        { finalHomeChecked: true },
+        {
+          dashboardState: { hasActiveLots: true, hasProtocolLinkedToLatestLot: true },
+          agendaState: { hasGeneratedActivities: true, pendingActivitiesTodayCount: 0, completedActivitiesTodayCount: 2, lastInteractionType: 'completed' },
+          fieldNotebookState: { hasRecentNutritionAdjustmentRecord: true },
+        },
+      );
       const result = deriveInstantSignals(ctx);
-      expect(result.stepId).toBe('test_finish_agenda');
-      expect(result.targetRoute).toBe('/agendaPage');
-      expect(result.focusMessage).toBe('Concluir na Agenda');
-    });
-
-    test('step 5: agenda completed, home not checked → test_review_final_home', () => {
-      const ctx = testContext({
-        lotWithProtocolCreated: true, generatedActivitiesSeen: true,
-        adjustmentRecorded: true, agendaActivitiesCompleted: true,
-        finalHomeChecked: false,
-      });
-      const result = deriveInstantSignals(ctx);
-      expect(result.stepId).toBe('test_review_final_home');
-      expect(result.targetRoute).toBe('/lotePage');
-      expect(result.focusMessage).toBe('Revisar Agenda - lote segue em acompanhamento');
-    });
-
-    test('step 6: all done → test_complete', () => {
-      const ctx = testContext({
-        lotWithProtocolCreated: true, generatedActivitiesSeen: true,
-        adjustmentRecorded: true, agendaActivitiesCompleted: true,
-        finalHomeChecked: true,
-      });
-      const result = deriveInstantSignals(ctx);
-      expect(result.stepId).toBe('test_complete');
+      expect(result.stepId).toBe('review_final_home');
       expect(result.targetRoute).toBe('/relatoriosPage');
+      expect(result.stepId).not.toMatch(/^test_/);
     });
 
-    test('test sequence overrides critical alerts during experiment', () => {
-      const ctx = testContext({
-        lotWithProtocolCreated: true, generatedActivitiesSeen: false,
-        adjustmentRecorded: false, agendaActivitiesCompleted: false,
-      }, { hasCriticalAlerts: true, criticalCount: 2 });
+    test('critical alerts remain above legacy testSequenceSignals', () => {
+      const ctx = legacyContext(
+        { lotWithProtocolCreated: true, generatedActivitiesSeen: false },
+        { alertState: { hasCriticalAlerts: true, criticalCount: 2 } },
+      );
       const result = deriveInstantSignals(ctx);
-      expect(result.stepId).toBe('test_check_generated_activities');
+      expect(result.stepId).toBe('review_critical_alerts');
       expect(result.targetRoute).toBe('/agendaPage');
     });
 
@@ -719,8 +753,8 @@ describe('Enhanced INSTANT mode contract', () => {
     });
   });
 
-  describe('Opção B — resolveRouteConflicts with test sequence', () => {
-    test('first shortcut can repeat targetRoute in test step', () => {
+  describe('resolveRouteConflicts', () => {
+    test('unknown legacy test step is not specially resolved', () => {
       const result = resolveRouteConflicts(
         'test_check_generated_activities',
         '/agendaPage',
@@ -731,7 +765,6 @@ describe('Enhanced INSTANT mode contract', () => {
           { route: '/lotePage', label: 'Lote', group: 'contextual', confidence: 0.5 },
         ],
       );
-      // Opção B: first shortcut repeats targetRoute, should survive
       expect(result.shortcuts.length).toBe(3);
       expect(result.shortcuts[0].route).toBe('/agendaPage');
       expect(result.shortcuts[0].route).toBe(result.nextStepRoute);

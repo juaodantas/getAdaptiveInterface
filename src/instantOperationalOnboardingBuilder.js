@@ -1,7 +1,7 @@
 const { ALLOWED_INSTANT_ROUTES } = require('./adaptiveContract');
 const { DOMAIN_RULES } = require('./instantDomainRules');
 
-const STEP_IDS_WITH_ONBOARDING = ['create_lot_with_protocol', 'test_create_lot_with_protocol'];
+const STEP_IDS_WITH_ONBOARDING = ['create_lot_with_protocol'];
 
 const OPERATIONAL_ONBOARDING_FALLBACK = {
   title: 'Como começar',

@@ -39,18 +39,15 @@ const INFO_BY_RULE = {
     type: 'basic_tip', category: 'protocolo', source: 'local_tip', priority: 'high', ctaRoute: '/protocoloPage',
   },
   [RULE_IDS.CHECK_GENERATED_ACTIVITIES]: {
-    type: 'day_progress', category: 'agenda', source: 'isis', priority: 'high', ctaRoute: '/agendaPage',
+    type: 'today_cultivation', category: 'agenda', source: 'isis', priority: 'high', ctaRoute: '/agendaPage',
   },
   [RULE_IDS.RECORD_CADERNO_ADJUSTMENT]: {
-    type: 'field_notes_summary', category: 'caderno_campo', source: 'isis', priority: 'high', ctaRoute: '/cadernoCampoPage',
+    type: 'today_cultivation', category: 'caderno_campo', source: 'isis', priority: 'high', ctaRoute: '/cadernoCampoPage',
   },
   [RULE_IDS.FINISH_AGENDA_ACTIVITIES]: {
-    type: 'day_progress', category: 'agenda', source: 'isis', priority: 'medium', ctaRoute: '/agendaPage',
+    type: 'field_notes_summary', category: 'agenda', source: 'isis', priority: 'medium', ctaRoute: '/agendaPage',
   },
   [RULE_IDS.REVIEW_FINAL_HOME]: {
-    type: 'day_progress', category: 'geral', source: 'local_tip', priority: 'low', ctaRoute: '/relatoriosPage',
-  },
-  [RULE_IDS.TEST_COMPLETE]: {
     type: 'basic_tip', category: 'geral', source: 'local_tip', priority: 'low', ctaRoute: '/relatoriosPage',
   },
   [RULE_IDS.OVERDUE_TASKS]: {
@@ -96,7 +93,7 @@ function localTemplateForType(type) {
 }
 
 function hasRecentAgendaInteraction(agendaState) {
-  return agendaState && typeof agendaState.lastInteractionType === 'string';
+  return agendaState && (typeof agendaState.lastAgendaInteraction === 'string' || typeof agendaState.lastInteractionType === 'string');
 }
 
 function isValidInfoRecommendation(infoRecommendation, clientCapabilities = {}) {
@@ -158,8 +155,8 @@ function buildInfoRecommendationFallback({ signals = {}, clientCapabilities = {}
   let template = null;
 
   const agendaState = operationalContext.agendaState || {};
-  if (hasRecentAgendaInteraction(agendaState)) {
-    const interactionType = agendaState.lastInteractionType;
+  if (!base && hasRecentAgendaInteraction(agendaState)) {
+    const interactionType = agendaState.lastAgendaInteraction || agendaState.lastInteractionType;
     const activityTitle = agendaState.lastActivityTitle;
 
     if (interactionType === 'completed') {
@@ -256,8 +253,7 @@ function remapShortcutRoute(shortcut, route) {
 
 function resolveRouteConflicts(stepId, nextStepRoute, infoCtaRoute, shortcuts) {
   const resolver = ROUTE_CONFLICT_RESOLVER[stepId];
-  const isTestSequence = typeof stepId === 'string' && stepId.startsWith('test_');
-  if (!resolver && !isTestSequence) return { nextStepRoute, infoCtaRoute, shortcuts };
+  if (!resolver) return { nextStepRoute, infoCtaRoute, shortcuts };
 
   const usedRoutes = new Set();
   const resolvedInfoCta = (infoCtaRoute && (infoCtaRoute === nextStepRoute || usedRoutes.has(infoCtaRoute)))
@@ -268,11 +264,6 @@ function resolveRouteConflicts(stepId, nextStepRoute, infoCtaRoute, shortcuts) {
 
   const resolvedShortcuts = (shortcuts || []).map((sc, index) => {
     if (!sc || !sc.route) return sc;
-    // Opção B: first shortcut in test sequence can repeat nextStepRoute
-    if (isTestSequence && index === 0 && sc.route === nextStepRoute) {
-      usedRoutes.add(sc.route);
-      return sc;
-    }
     if (!usedRoutes.has(sc.route)) {
       usedRoutes.add(sc.route);
       return sc;

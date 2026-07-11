@@ -38,16 +38,6 @@ function toDate(value) {
   return null;
 }
 
-function deriveSequenceStage(context, signals) {
-  const sequence = context.testSequenceSignals || {};
-  if (sequence.finalHomeChecked) return 'test_complete';
-  if (sequence.agendaActivitiesCompleted) return 'agenda_completed';
-  if (sequence.adjustmentRecorded) return 'adjustment_recorded';
-  if (sequence.generatedActivitiesSeen) return 'activities_seen';
-  if (sequence.lotWithProtocolCreated) return 'lot_protocol_created';
-  return signals.stepId || 'unknown';
-}
-
 function deriveContextProfile({ operationalContext, signals, navigationContext }) {
   const context = operationalContext || {};
   const dashboard = context.dashboardState || {};
@@ -62,7 +52,7 @@ function deriveContextProfile({ operationalContext, signals, navigationContext }
   const currentRoute = typeof navigationContext?.currentRoute === 'string' ? navigationContext.currentRoute.split('?')[0] : null;
 
   return {
-    sequenceStage: deriveSequenceStage(context, signals),
+    stepStage: signals.stepId || 'unknown',
     lotState: dashboard.hasActiveLots || dashboard.hasProtocolLinkedToLatestLot
       ? (dashboard.hasProtocolLinkedToLatestLot ? 'active_with_protocol' : 'active_without_protocol')
       : 'none',
@@ -130,7 +120,7 @@ function containsUnsafeCacheText(value) {
 }
 
 function hasStableContext(signals, contextProfile) {
-  return Boolean(signals?.stepId && contextProfile?.sequenceStage && contextProfile.sequenceStage !== 'unknown');
+  return Boolean(signals?.stepId && contextProfile?.stepStage && contextProfile.stepStage !== 'unknown');
 }
 
 function isVolatileProfile(contextProfile) {

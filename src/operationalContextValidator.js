@@ -124,6 +124,44 @@ function normalizeMappedString(value, allowedMap) {
   return allowedMap[normalized] || null;
 }
 
+function normalizeSafeDimension(value, maxLength = 40) {
+  if (typeof value !== 'string') return null;
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized.length === 0 || normalized.length > maxLength) return null;
+
+  return /^[a-z0-9_-]+$/.test(normalized) ? normalized : null;
+}
+
+function firstSafeCount(...values) {
+  for (const value of values) {
+    if (Number.isInteger(value) && value >= 0) {
+      return toSafeCount(value);
+    }
+  }
+
+  return 0;
+}
+
+function normalizeRecentUserActions(values) {
+  if (!Array.isArray(values)) return [];
+
+  return values.map((value) => {
+    const item = objectOrEmpty(value);
+    const entityType = normalizeSafeDimension(item.entityType);
+    const action = normalizeSafeDimension(item.action);
+    const timestamp = normalizeIsoTimestamp(item.timestamp);
+
+    if (!entityType || !action || !timestamp) return null;
+
+    const normalized = { entityType, action, timestamp };
+    const entityId = toSafeText(item.entityId, 80);
+    if (entityId) normalized.entityId = entityId;
+
+    return normalized;
+  }).filter(Boolean).slice(0, 10);
+}
+
 function normalizeOperationalContext(raw) {
   const context = objectOrEmpty(raw);
   const dashboardState = objectOrEmpty(context.dashboardState);
@@ -138,6 +176,49 @@ function normalizeOperationalContext(raw) {
   const alertState = objectOrEmpty(context.alertState);
   const testSequenceSignals = objectOrEmpty(context.testSequenceSignals);
   const nextActivity = objectOrEmpty(agendaState.nextActivity);
+  const dueBuckets = normalizeBuckets(agendaState.dueBuckets, ['overdue', 'today', 'thisWeek', 'nextWeek']);
+  const latestTasks = normalizeObjects(agendaState.latestTasks, (item) => ({
+    id: toSafeText(item.id, 80),
+    title: toSafeText(item.title, 100),
+    type: normalizeAllowedString(item.type, NEXT_ACTIVITY_TYPES),
+    status: normalizeAllowedString(item.status, ACTIVITY_STATUSES),
+    dueLabel: normalizeMappedString(item.dueLabel, DUE_LABELS),
+    lotId: toSafeText(item.lotId, 80),
+    lotName: toSafeText(item.lotName, 80),
+    overdue: toBoolean(item.overdue),
+  }));
+  const normalizedNextActivity = {
+    id: toSafeText(nextActivity.id, 80),
+    title: toSafeText(nextActivity.title, 100),
+    description: toSafeText(nextActivity.description, 180),
+    type: normalizeAllowedString(nextActivity.type, NEXT_ACTIVITY_TYPES),
+    status: normalizeAllowedString(nextActivity.status, ACTIVITY_STATUSES),
+    dueLabel: normalizeMappedString(nextActivity.dueLabel, DUE_LABELS),
+    lotId: toSafeText(nextActivity.lotId, 80),
+    lotName: toSafeText(nextActivity.lotName, 80),
+    overdue: toBoolean(nextActivity.overdue),
+  };
+  const pendingToday = firstSafeCount(agendaState.pendingToday, agendaState.pendingActivitiesTodayCount, dueBuckets.today);
+  const overdueCount = firstSafeCount(agendaState.overdueCount, agendaState.overdueActivitiesCount, dueBuckets.overdue);
+  const hasOverdue = agendaState.hasOverdue === true || overdueCount > 0;
+  const lastAgendaInteraction = normalizeAllowedString(agendaState.lastAgendaInteraction, AGENDA_INTERACTION_TYPES)
+    || normalizeAllowedString(agendaState.lastInteractionType, AGENDA_INTERACTION_TYPES);
+  const nextActivityType = normalizeAllowedString(agendaState.nextActivityType, NEXT_ACTIVITY_TYPES) || normalizedNextActivity.type;
+  const nextActivityStatus = normalizeAllowedString(agendaState.nextActivityStatus, ACTIVITY_STATUSES) || normalizedNextActivity.status;
+  const nextActivityDueLabel = normalizeMappedString(agendaState.nextActivityDueLabel, DUE_LABELS) || normalizedNextActivity.dueLabel;
+  const nextActivityOverdue = agendaState.nextActivityOverdue === true || normalizedNextActivity.overdue;
+  const hasProtocolTasks = agendaState.hasProtocolTasks === true || latestTasks.some((task) => task.type === 'protocol_activity');
+  const hasRecentNotes = fieldNotebookState.hasRecentNotes === true || fieldNotebookState.hasRecentFieldNotes === true;
+  const hasNutritionAdjustmentRecord = fieldNotebookState.hasNutritionAdjustmentRecord === true || fieldNotebookState.hasRecentNutritionAdjustmentRecord === true;
+  const hasSowingNote = fieldNotebookState.hasSowingNote === true || fieldNotebookState.sowingNotePresent === true;
+  const cultures = normalizeObjects(cultivationState.cultures, (item) => ({
+    name: toSafeText(item.name, 80),
+    quantity: toSafeCount(item.quantity),
+    color: toSafeText(item.color, 30),
+  }));
+  const speciesInProgress = normalizeTextOrObjectArray(cultivationState.speciesInProgress);
+  const culturesCount = firstSafeCount(cultivationState.culturesCount, cultures.length);
+  const speciesInProgressCount = firstSafeCount(cultivationState.speciesInProgressCount, speciesInProgress.length);
 
   return {
     generatedAt: normalizeIsoTimestamp(context.generatedAt),
@@ -157,38 +238,31 @@ function normalizeOperationalContext(raw) {
     },
     agendaState: {
       hasGeneratedActivities: toBoolean(agendaState.hasGeneratedActivities),
+      pendingToday,
+      overdueCount,
+      hasOverdue,
+      nextActivityType,
+      nextActivityStatus,
+      nextActivityDueLabel,
+      nextActivityOverdue,
+      hasProtocolTasks,
+      lastAgendaInteraction,
       pendingActivitiesTodayCount: toSafeCount(agendaState.pendingActivitiesTodayCount),
       pendingActivitiesWeekCount: toSafeCount(agendaState.pendingActivitiesWeekCount),
       overdueActivitiesCount: toSafeCount(agendaState.overdueActivitiesCount),
       completedActivitiesTodayCount: toSafeCount(agendaState.completedActivitiesTodayCount),
-      dueBuckets: normalizeBuckets(agendaState.dueBuckets, ['today', 'thisWeek', 'nextWeek']),
+      dueBuckets,
       priorityBuckets: normalizeBuckets(agendaState.priorityBuckets, ['high', 'medium', 'low']),
-      latestTasks: normalizeObjects(agendaState.latestTasks, (item) => ({
-        id: toSafeText(item.id, 80),
-        title: toSafeText(item.title, 100),
-        type: normalizeAllowedString(item.type, NEXT_ACTIVITY_TYPES),
-        status: normalizeAllowedString(item.status, ACTIVITY_STATUSES),
-        dueLabel: normalizeMappedString(item.dueLabel, DUE_LABELS),
-        lotId: toSafeText(item.lotId, 80),
-        lotName: toSafeText(item.lotName, 80),
-        overdue: toBoolean(item.overdue),
-      })),
-      nextActivity: {
-        id: toSafeText(nextActivity.id, 80),
-        title: toSafeText(nextActivity.title, 100),
-        description: toSafeText(nextActivity.description, 180),
-        type: normalizeAllowedString(nextActivity.type, NEXT_ACTIVITY_TYPES),
-        status: normalizeAllowedString(nextActivity.status, ACTIVITY_STATUSES),
-        dueLabel: normalizeMappedString(nextActivity.dueLabel, DUE_LABELS),
-        lotId: toSafeText(nextActivity.lotId, 80),
-        lotName: toSafeText(nextActivity.lotName, 80),
-        overdue: toBoolean(nextActivity.overdue),
-      },
+      latestTasks,
+      nextActivity: normalizedNextActivity,
       lastInteractionType: normalizeAllowedString(agendaState.lastInteractionType, AGENDA_INTERACTION_TYPES),
       lastActivityTitle: toSafeText(agendaState.lastActivityTitle, 100),
       lastActivityDescription: toSafeText(agendaState.lastActivityDescription, 180),
     },
     fieldNotebookState: {
+      hasRecentNotes,
+      hasNutritionAdjustmentRecord,
+      hasSowingNote,
       hasRecentNutritionAdjustmentRecord: toBoolean(fieldNotebookState.hasRecentNutritionAdjustmentRecord),
       hasRecentFieldNotes: toBoolean(fieldNotebookState.hasRecentFieldNotes),
       totalRecentNotes: toSafeCount(fieldNotebookState.totalRecentNotes),
@@ -262,13 +336,11 @@ function normalizeOperationalContext(raw) {
       topCulture: normalizeCultureReference(productionState.topCulture),
     },
     cultivationState: {
-      cultures: normalizeObjects(cultivationState.cultures, (item) => ({
-        name: toSafeText(item.name, 80),
-        quantity: toSafeCount(item.quantity),
-        color: toSafeText(item.color, 30),
-      })),
+      culturesCount,
+      speciesInProgressCount,
+      cultures,
       dominantCulture: normalizeCultureReference(cultivationState.dominantCulture),
-      speciesInProgress: normalizeTextOrObjectArray(cultivationState.speciesInProgress),
+      speciesInProgress,
     },
     teamState: {
       activeMembers: toSafeCount(teamState.activeMembers),
@@ -343,6 +415,7 @@ function normalizeOperationalContext(raw) {
       lastRelevantEvent: toSafeText(testSequenceSignals.lastRelevantEvent, 80),
       changedAt: normalizeIsoTimestamp(testSequenceSignals.changedAt),
     },
+    recentUserActions: normalizeRecentUserActions(context.recentUserActions),
   };
 }
 

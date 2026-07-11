@@ -4,7 +4,6 @@ const RULE_IDS = {
   RECORD_CADERNO_ADJUSTMENT: 'RULE-003',
   FINISH_AGENDA_ACTIVITIES: 'RULE-004',
   REVIEW_FINAL_HOME: 'RULE-005',
-  TEST_COMPLETE: 'RULE-006',
   OVERDUE_TASKS: 'RULE-007',
   CRITICAL_ALERTS: 'RULE-008',
   AVOID_EMPTY_PRODUCTION: 'RULE-009',
@@ -14,12 +13,6 @@ const RULE_IDS = {
   RESERVOIR_ATTENTION: 'RULE-013',
   PRODUCTION_CONTEXT: 'RULE-014',
   TEAM_CONTEXT: 'RULE-015',
-  TEST_CREATE_LOT: 'RULE-016',
-  TEST_CHECK_ACTIVITIES: 'RULE-017',
-  TEST_RECORD_ADJUSTMENT: 'RULE-018',
-  TEST_FINISH_AGENDA: 'RULE-019',
-  TEST_REVIEW_FINAL: 'RULE-020',
-  TEST_COMPLETE: 'RULE-021',
 };
 
 const DOMAIN_RULES = [
@@ -28,7 +21,6 @@ const DOMAIN_RULES = [
   { id: RULE_IDS.RECORD_CADERNO_ADJUSTMENT, description: 'Atividades vistas e ajuste não registrado: recomendar Caderno de Campo.' },
   { id: RULE_IDS.FINISH_AGENDA_ACTIVITIES, description: 'Ajuste registrado e atividades pendentes: recomendar conclusão na Agenda.' },
   { id: RULE_IDS.REVIEW_FINAL_HOME, description: 'Atividades concluídas: recomendar conferência final pela Home.' },
-  { id: RULE_IDS.TEST_COMPLETE, description: 'Roteiro concluído: exibir estado de conclusão.' },
   { id: RULE_IDS.OVERDUE_TASKS, description: 'Há tarefas atrasadas: priorizar Agenda/tarefas sobre produção.' },
   { id: RULE_IDS.CRITICAL_ALERTS, description: 'Há alertas críticos: priorizar atenção operacional.' },
   { id: RULE_IDS.AVOID_EMPTY_PRODUCTION, description: 'Não há dados de produção: usar contexto/onboarding, não destacar produção vazia.' },
@@ -38,12 +30,6 @@ const DOMAIN_RULES = [
   { id: RULE_IDS.RESERVOIR_ATTENTION, description: 'Há sinais de reservatório ou solução nutritiva: recomendar reservatórios/solução.' },
   { id: RULE_IDS.PRODUCTION_CONTEXT, description: 'Há dados de produção ou cultivo: recomendar resumo operacional.' },
   { id: RULE_IDS.TEAM_CONTEXT, description: 'Há sinais de equipe: recomendar saúde da equipe.' },
-  { id: RULE_IDS.TEST_CREATE_LOT, description: '[Test] Criar primeiro lote com protocolo.' },
-  { id: RULE_IDS.TEST_CHECK_ACTIVITIES, description: '[Test] Conferir atividades geradas na Agenda.' },
-  { id: RULE_IDS.TEST_RECORD_ADJUSTMENT, description: '[Test] Registrar ajuste no Caderno de Campo.' },
-  { id: RULE_IDS.TEST_FINISH_AGENDA, description: '[Test] Finalizar atividades pendentes na Agenda.' },
-  { id: RULE_IDS.TEST_REVIEW_FINAL, description: '[Test] Revisar lote em acompanhamento.' },
-  { id: RULE_IDS.TEST_COMPLETE, description: '[Test] Roteiro concluído.' },
 ];
 
 const ROUTE_CONFLICT_RESOLVER = {
@@ -71,11 +57,6 @@ const ROUTE_CONFLICT_RESOLVER = {
     '/relatoriosPage': '/agendaPage',
     '/agendaPage': '/solucaoPage',
     '/solucaoPage': '/relatoriosPage',
-  },
-  test_complete: {
-    '/relatoriosPage': '/agendaPage',
-    '/agendaPage': '/protocoloPage',
-    '/protocoloPage': '/relatoriosPage',
   },
   review_critical_alerts: {
     '/agendaPage': '/gerenciarEquipePage',
@@ -121,11 +102,6 @@ const STEP_SHORTCUTS = {
     { route: '/agendaPage', label: 'Histórico', description: 'Veja o histórico de atividades concluídas', group: 'secondary' },
     { route: '/solucaoPage', label: 'Soluções', description: 'Revise as soluções aplicadas', group: 'contextual' },
   ],
-  test_complete: [
-    { route: '/relatoriosPage', label: 'Ver Relatórios', description: 'Revise o resumo completo do roteiro', group: 'primary' },
-    { route: '/agendaPage', label: 'Agenda', description: 'Acesse o histórico de atividades', group: 'secondary' },
-    { route: '/protocoloPage', label: 'Protocolo', description: 'Consulte o protocolo utilizado', group: 'contextual' },
-  ],
   review_critical_alerts: [
     { route: '/agendaPage', label: 'Ver Alertas', description: 'Revise os alertas críticos operacionais', group: 'primary' },
     { route: '/gerenciarEquipePage', label: 'Gerenciar Equipe', description: 'Verifique a alocação da equipe', group: 'secondary' },
@@ -144,102 +120,6 @@ const STEP_SHORTCUTS = {
   review_team: [{ route: '/gerenciarEquipePage', label: 'Equipe', description: 'Revise saúde operacional da equipe', group: 'primary' }, { route: '/agendaPage', label: 'Agenda', description: 'Acompanhe atividades da equipe', group: 'secondary' }, { route: '/relatoriosPage', label: 'Relatórios', description: 'Veja indicadores da equipe', group: 'contextual' }],
 };
 
-const TEST_SEQUENCE_SHORTCUTS = {
-  test_create_lot_with_protocol: [
-    { route: '/lotePage', label: 'Criar primeiro lote', description: 'Comece vinculando um protocolo ao lote', group: 'primary' },
-    { route: '/protocoloPage', label: 'Ver protocolos', description: 'Consulte os protocolos de cultivo disponíveis', group: 'secondary' },
-    { route: '/areaCultivoPage', label: 'Áreas de cultivo', description: 'Configure a estrutura de áreas de cultivo', group: 'contextual' },
-  ],
-  test_check_generated_activities: [
-    { route: '/agendaPage', label: 'Ver Agenda', description: 'Confira as atividades geradas para o primeiro dia', group: 'primary' },
-    { route: '/lotePage', label: 'Ver Lote', description: 'Consulte o lote vinculado ao protocolo', group: 'secondary' },
-    { route: '/cadernoCampoPage', label: 'Caderno de Campo', description: 'Acesse o caderno de campo', group: 'contextual' },
-  ],
-  test_record_adjustment: [
-    { route: '/cadernoCampoPage', label: 'Caderno de Campo', description: 'Registre a atividade no caderno de campo', group: 'primary' },
-    { route: '/agendaPage', label: 'Ver Agenda', description: 'Consulte a programação de atividades', group: 'secondary' },
-    { route: '/lotePage', label: 'Ver Lote', description: 'Veja os detalhes do lote', group: 'contextual' },
-  ],
-  test_finish_agenda: [
-    { route: '/agendaPage', label: 'Concluir na Agenda', description: 'Finalize as atividades pendentes na agenda', group: 'primary' },
-    { route: '/cadernoCampoPage', label: 'Caderno de Campo', description: 'Confira os últimos registros no caderno', group: 'secondary' },
-    { route: '/lotePage', label: 'Ver Lote', description: 'Acompanhe o lote em produção', group: 'contextual' },
-  ],
-  test_review_final_home: [
-    { route: '/lotePage', label: 'Ver Lote', description: 'Revise o lote em acompanhamento', group: 'primary' },
-    { route: '/cadernoCampoPage', label: 'Caderno de Campo', description: 'Confira os registros do caderno', group: 'secondary' },
-    { route: '/agendaPage', label: 'Ver Agenda', description: 'Acompanhe o histórico de atividades', group: 'contextual' },
-  ],
-  test_complete: [
-    { route: '/relatoriosPage', label: 'Ver Relatórios', description: 'Revise o resumo completo do roteiro', group: 'primary' },
-    { route: '/agendaPage', label: 'Agenda', description: 'Acesse o histórico de atividades', group: 'secondary' },
-    { route: '/lotePage', label: 'Lote', description: 'Consulte o lote utilizado', group: 'contextual' },
-  ],
-};
-
-const TEST_SEQUENCE_STEPS = {
-  test_create_lot_with_protocol: {
-    stepId: 'test_create_lot_with_protocol',
-    targetRoute: '/lotePage',
-    dashboardId: 'LOTE_PRODUCAO',
-    focusMessage: 'Comece criando seu primeiro lote',
-    expectedInfoType: 'basic_tip',
-    requiredShortcutRoutes: ['/lotePage', '/protocoloPage', '/areaCultivoPage'],
-    forbiddenRoutes: ['/relatoriosPage', '/reservatoriosPage', '/gerenciarEquipePage'],
-    priority: 'mandatory_test_sequence',
-  },
-  test_check_generated_activities: {
-    stepId: 'test_check_generated_activities',
-    targetRoute: '/agendaPage',
-    dashboardId: 'TAREFAS_PENDENTES',
-    focusMessage: 'Confira a Agenda antes de seguir.',
-    expectedInfoType: 'today_cultivation',
-    requiredShortcutRoutes: ['/agendaPage', '/lotePage', '/cadernoCampoPage'],
-    forbiddenRoutes: ['/relatoriosPage', '/reservatoriosPage', '/gerenciarEquipePage'],
-    priority: 'mandatory_test_sequence',
-  },
-  test_record_adjustment: {
-    stepId: 'test_record_adjustment',
-    targetRoute: '/cadernoCampoPage',
-    dashboardId: 'TAREFAS_PENDENTES',
-    focusMessage: 'Caderno de campo - Registrar atividade',
-    expectedInfoType: 'today_cultivation',
-    requiredShortcutRoutes: ['/cadernoCampoPage', '/agendaPage', '/lotePage'],
-    forbiddenRoutes: ['/relatoriosPage', '/reservatoriosPage', '/gerenciarEquipePage'],
-    priority: 'mandatory_test_sequence',
-  },
-  test_finish_agenda: {
-    stepId: 'test_finish_agenda',
-    targetRoute: '/agendaPage',
-    dashboardId: 'TAREFAS_PENDENTES',
-    focusMessage: 'Concluir na Agenda',
-    expectedInfoType: 'field_notes_summary',
-    requiredShortcutRoutes: ['/agendaPage', '/cadernoCampoPage', '/lotePage'],
-    forbiddenRoutes: ['/relatoriosPage', '/reservatoriosPage', '/gerenciarEquipePage'],
-    priority: 'mandatory_test_sequence',
-  },
-  test_review_final_home: {
-    stepId: 'test_review_final_home',
-    targetRoute: '/lotePage',
-    dashboardId: 'TAREFAS_PENDENTES',
-    focusMessage: 'Revisar Agenda - lote segue em acompanhamento',
-    expectedInfoType: 'basic_tip',
-    requiredShortcutRoutes: ['/lotePage', '/cadernoCampoPage', '/agendaPage'],
-    forbiddenRoutes: ['/relatoriosPage', '/reservatoriosPage', '/gerenciarEquipePage'],
-    priority: 'mandatory_test_sequence',
-  },
-  test_complete: {
-    stepId: 'test_complete',
-    targetRoute: '/relatoriosPage',
-    dashboardId: 'TAREFAS_PENDENTES',
-    focusMessage: 'Roteiro de teste concluído',
-    expectedInfoType: 'basic_tip',
-    requiredShortcutRoutes: ['/relatoriosPage', '/agendaPage', '/lotePage'],
-    forbiddenRoutes: ['/reservatoriosPage', '/gerenciarEquipePage'],
-    priority: 'mandatory_test_sequence',
-  },
-};
-
 function applyShortcutConfidence(shortcuts, baseConfidence) {
   return shortcuts.map((shortcut, index) => {
     const multiplier = index === 0 ? 1.0 : index === 1 ? 0.85 : 0.75;
@@ -248,42 +128,6 @@ function applyShortcutConfidence(shortcuts, baseConfidence) {
       confidence: Math.round(baseConfidence * multiplier * 100) / 100,
     };
   });
-}
-
-function resolveTestSequenceStep(effective) {
-  if (effective.lotWithProtocolCreated === undefined) {
-    return null;
-  }
-
-  const rulesApplied = [RULE_IDS.NO_PROGRESS_BAR];
-
-  if (!effective.lotWithProtocolCreated) {
-    rulesApplied.push(RULE_IDS.TEST_CREATE_LOT);
-    return { ...TEST_SEQUENCE_STEPS.test_create_lot_with_protocol, rulesApplied, shortcuts: applyShortcutConfidence(TEST_SEQUENCE_SHORTCUTS.test_create_lot_with_protocol, 0.85) };
-  }
-
-  if (!effective.generatedActivitiesSeen) {
-    rulesApplied.push(RULE_IDS.TEST_CHECK_ACTIVITIES);
-    return { ...TEST_SEQUENCE_STEPS.test_check_generated_activities, rulesApplied, shortcuts: applyShortcutConfidence(TEST_SEQUENCE_SHORTCUTS.test_check_generated_activities, 0.8) };
-  }
-
-  if (!effective.adjustmentRecorded) {
-    rulesApplied.push(RULE_IDS.TEST_RECORD_ADJUSTMENT);
-    return { ...TEST_SEQUENCE_STEPS.test_record_adjustment, rulesApplied, shortcuts: applyShortcutConfidence(TEST_SEQUENCE_SHORTCUTS.test_record_adjustment, 0.8) };
-  }
-
-  if (!effective.agendaActivitiesCompleted) {
-    rulesApplied.push(RULE_IDS.TEST_FINISH_AGENDA);
-    return { ...TEST_SEQUENCE_STEPS.test_finish_agenda, rulesApplied, shortcuts: applyShortcutConfidence(TEST_SEQUENCE_SHORTCUTS.test_finish_agenda, 0.8) };
-  }
-
-  if (!effective.finalHomeChecked) {
-    rulesApplied.push(RULE_IDS.TEST_REVIEW_FINAL);
-    return { ...TEST_SEQUENCE_STEPS.test_review_final_home, rulesApplied, shortcuts: applyShortcutConfidence(TEST_SEQUENCE_SHORTCUTS.test_review_final_home, 0.75) };
-  }
-
-  rulesApplied.push(RULE_IDS.TEST_COMPLETE);
-  return { ...TEST_SEQUENCE_STEPS.test_complete, rulesApplied, shortcuts: applyShortcutConfidence(TEST_SEQUENCE_SHORTCUTS.test_complete, 0.6) };
 }
 
 function deriveInstantSignals(context) {
@@ -295,60 +139,26 @@ function deriveInstantSignals(context) {
   const cultivation = context.cultivationState || {};
   const team = context.teamState || {};
   const alerts = context.alertState;
-  const infoCards = context.infoCardsState || {};
-  const sequence = context.testSequenceSignals;
   const rulesApplied = [RULE_IDS.NO_PROGRESS_BAR];
 
-  // Detecta se a sequência de teste está ativa.
-  // Pode ser ativada por:
-  //   1. experimentActive === true (flag explícita enviada pelo app quando modo INSTANT está ativo)
-  //   2. lastRelevantEvent !== null (pelo menos um evento de sequência já foi registrado)
-  //   3. Qualquer sinal de progresso já atingido (recuperação após reset de sessão)
-  const hasActiveTestSequence = sequence && (
-    sequence.experimentActive === true
-    || sequence.lastRelevantEvent !== null
-    || sequence.lotWithProtocolCreated
-    || sequence.generatedActivitiesSeen
-    || sequence.adjustmentRecorded
-    || sequence.agendaActivitiesCompleted
-    || sequence.finalHomeChecked
-  );
+  const effective = {
+    lotWithProtocolCreated: dashboard.hasProtocolLinkedToLatestLot
+      || (dashboard.hasActiveLots && agenda.hasGeneratedActivities),
+    generatedActivitiesSeen: agenda.hasGeneratedActivities && (dashboard.hasProtocolLinkedToLatestLot || dashboard.hasActiveLots),
+    adjustmentRecorded: notebook.hasNutritionAdjustmentRecord,
+    agendaActivitiesCompleted: agenda.lastAgendaInteraction === 'completed' && agenda.pendingToday === 0,
+    finalHomeChecked: false,
+  };
 
-  // Sinais efetivos:
-  // Durante a sequência de teste, usa APENAS os sinais de sessão (testSequenceSignals),
-  // sem merge com estado persistente do dashboard. Isso garante que o roteiro controlado
-  // do experimento siga fielmente os passos definidos, ignorando dados reais da conta.
-  // Fora do experimento, combina sinais de sessão com estado do dashboard como fallback
-  // para proteger contra perda de progresso em caso de logout.
-  const effective = hasActiveTestSequence
-    ? {
-        lotWithProtocolCreated: sequence.lotWithProtocolCreated === true,
-        generatedActivitiesSeen: sequence.generatedActivitiesSeen === true,
-        adjustmentRecorded: sequence.adjustmentRecorded === true,
-        agendaActivitiesCompleted: sequence.agendaActivitiesCompleted === true,
-        finalHomeChecked: sequence.finalHomeChecked === true,
-      }
-    : {
-        lotWithProtocolCreated: sequence.lotWithProtocolCreated
-          || dashboard.hasProtocolLinkedToLatestLot
-          || (dashboard.hasActiveLots && agenda.hasGeneratedActivities),
-        generatedActivitiesSeen: sequence.generatedActivitiesSeen
-          || (agenda.hasGeneratedActivities && (dashboard.hasProtocolLinkedToLatestLot || dashboard.hasActiveLots)),
-        adjustmentRecorded: sequence.adjustmentRecorded || notebook.hasRecentNutritionAdjustmentRecord,
-        agendaActivitiesCompleted: sequence.agendaActivitiesCompleted || agenda.lastInteractionType === 'completed',
-        finalHomeChecked: sequence.finalHomeChecked,
-      };
-
-  const hasTodayTasks = agenda.pendingActivitiesTodayCount > 0
-    || agenda.dueBuckets?.today > 0
-    || agenda.nextActivity?.dueLabel === 'today'
-    || agenda.nextActivity?.status === 'pending';
+  const hasTodayTasks = agenda.pendingToday > 0
+    || agenda.nextActivityDueLabel === 'today'
+    || agenda.nextActivityStatus === 'pending';
   const hasProtocolTask = agenda.hasGeneratedActivities
-    || agenda.nextActivity?.type === 'protocol_activity'
-    || (agenda.latestTasks || []).some((task) => task.type === 'protocol_activity');
-  const hasFieldNotebookSignal = notebook.hasRecentFieldNotes
+    || agenda.hasProtocolTasks
+    || agenda.nextActivityType === 'protocol_activity';
+  const hasFieldNotebookSignal = notebook.hasRecentNotes
     || notebook.totalRecentNotes > 0
-    || notebook.sowingNotePresent
+    || notebook.hasSowingNote
     || (notebook.latestNotes || []).length > 0;
   const hasReservoirSignal = reservoir.hasReservoirs
     || reservoir.criticalLevelCount > 0
@@ -361,10 +171,9 @@ function deriveInstantSignals(context) {
     || production.harvestedPlantsLast30d > 0
     || production.producedPackagesLast30d > 0
     || production.upcomingHarvestLots > 0
-    || (cultivation.cultures || []).length > 0
-    || (cultivation.speciesInProgress || []).length > 0
-    || dashboard.hasUpcomingHarvests
-    || infoCards.todayCultivation?.activeLots > 0;
+    || cultivation.culturesCount > 0
+    || cultivation.speciesInProgressCount > 0
+    || dashboard.hasUpcomingHarvests;
   const hasTeamSignal = team.activeMembers > 0 || team.overdueActivities > 0 || team.onTimeActivities > 0;
 
   // Sinal derivado: lote com protocolo ativo + atividades vistas + sem registro no caderno.
@@ -372,39 +181,24 @@ function deriveInstantSignals(context) {
   const needsFieldNote =
     effective.lotWithProtocolCreated
     && effective.generatedActivitiesSeen
-    && !notebook.hasRecentFieldNotes
-    && !notebook.hasRecentNutritionAdjustmentRecord;
+    && !notebook.hasRecentNotes
+    && !notebook.hasNutritionAdjustmentRecord;
 
-  // Priority 0: Test sequence — overrides everything during experiment
-  // Detectado no bloco de sinais efetivos acima (hasActiveTestSequence).
-  // A variável já foi definida junto com o bloco de sinais efetivos.
-  if (hasActiveTestSequence) {
-    const testStep = resolveTestSequenceStep(effective);
-    if (testStep) {
-      return testStep;
-    }
-  }
-
-  // Priority 1: Critical alerts override sequence
+  // Priority 1: Critical alerts
   if (alerts.hasCriticalAlerts || alerts.criticalCount > 0) {
     rulesApplied.push(RULE_IDS.CRITICAL_ALERTS);
     return { stepId: 'review_critical_alerts', targetRoute: '/agendaPage', dashboardId: 'SAUDE_EQUIPES', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.review_critical_alerts, 0.85) };
   }
 
   // Priority 2: Overdue tasks
-  if (agenda.overdueActivitiesCount > 0 || agenda.dueBuckets?.overdue > 0 || agenda.nextActivity?.overdue === true) {
+  if (agenda.hasOverdue || agenda.overdueCount > 0 || agenda.nextActivityOverdue === true) {
     rulesApplied.push(RULE_IDS.OVERDUE_TASKS);
     return { stepId: 'resolve_overdue_tasks', targetRoute: '/agendaPage', dashboardId: 'TAREFAS_PENDENTES', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.resolve_overdue_tasks, 0.85) };
   }
 
-  // Priority 2.5: Lote com protocolo precisa de registro em caderno de campo.
-  // Elevado de priority 7 para capturar o caso em que o usuário criou lote com protocolo,
-  // viu as atividades geradas, mas ainda não registrou trabalho de campo — situação comum
-  // em que antes só aparecia Agenda (today tasks). Agora Caderno de Campo aparece como
-  // recomendação prioritária quando há contexto de lote ativo.
   if (needsFieldNote) {
-    rulesApplied.push(RULE_IDS.FIELD_NOTEBOOK);
-    return { stepId: 'review_field_notes', targetRoute: '/cadernoCampoPage', dashboardId: 'TAREFAS_PENDENTES', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.review_field_notes, 0.8) };
+    rulesApplied.push(RULE_IDS.RECORD_CADERNO_ADJUSTMENT);
+    return { stepId: 'record_caderno_adjustment', targetRoute: '/cadernoCampoPage', dashboardId: 'TAREFAS_PENDENTES', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.record_caderno_adjustment, 0.8) };
   }
 
   // Priority 3: Today tasks / next task
@@ -414,7 +208,7 @@ function deriveInstantSignals(context) {
   }
 
   // Priority 4: Protocol tasks or recent protocol lot
-  if (hasProtocolTask && effective.lotWithProtocolCreated) {
+  if (hasProtocolTask && effective.lotWithProtocolCreated && !effective.agendaActivitiesCompleted) {
     rulesApplied.push(RULE_IDS.CHECK_GENERATED_ACTIVITIES);
     return { stepId: 'review_protocol_tasks', targetRoute: '/agendaPage', dashboardId: 'TAREFAS_PENDENTES', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.review_protocol_tasks, 0.75) };
   }
@@ -432,7 +226,7 @@ function deriveInstantSignals(context) {
   }
 
   // Step 4: Adjustment recorded, agenda activities pending
-  if (effective.adjustmentRecorded && agenda.pendingActivitiesTodayCount > 0 && !effective.agendaActivitiesCompleted) {
+  if (effective.adjustmentRecorded && agenda.pendingToday > 0 && !effective.agendaActivitiesCompleted) {
     rulesApplied.push(RULE_IDS.FINISH_AGENDA_ACTIVITIES);
     return { stepId: 'finish_agenda_activities', targetRoute: '/agendaPage', dashboardId: 'TAREFAS_PENDENTES', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.finish_agenda_activities, 0.65) };
   }
@@ -441,12 +235,6 @@ function deriveInstantSignals(context) {
   if (effective.agendaActivitiesCompleted && !effective.finalHomeChecked) {
     rulesApplied.push(RULE_IDS.REVIEW_FINAL_HOME);
     return { stepId: 'review_final_home', targetRoute: '/relatoriosPage', dashboardId: 'TAREFAS_PENDENTES', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.review_final_home, 0.65) };
-  }
-
-  // Step 6 (terminal): Test complete
-  if (effective.finalHomeChecked) {
-    rulesApplied.push(RULE_IDS.TEST_COMPLETE);
-    return { stepId: 'test_complete', targetRoute: '/relatoriosPage', dashboardId: 'TAREFAS_PENDENTES', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.test_complete, 0.5) };
   }
 
   // Priority 7: Field notebook / recent note
@@ -493,7 +281,4 @@ module.exports = {
   deriveInstantSignals,
   STEP_SHORTCUTS,
   ROUTE_CONFLICT_RESOLVER,
-  TEST_SEQUENCE_SHORTCUTS,
-  TEST_SEQUENCE_STEPS,
-  resolveTestSequenceStep,
 };

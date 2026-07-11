@@ -103,11 +103,13 @@ describe('instantRecommendationCache policy', () => {
     const base = lookupFor();
     const differentVersion = lookupFor(context(), capabilities(), 'instant-v2');
     const critical = lookupFor(context({ alertState: { hasCriticalAlerts: true, criticalCount: 1 } }));
-    const finalStep = lookupFor(context({ testSequenceSignals: { finalHomeChecked: true } }));
+    const noPendingAgenda = lookupFor(context({ agendaState: { hasGeneratedActivities: true, pendingActivitiesTodayCount: 0, completedActivitiesTodayCount: 2, lastInteractionType: 'completed' }, fieldNotebookState: { hasRecentNutritionAdjustmentRecord: true } }));
+    const legacyTestSignalsOnly = lookupFor(context({ testSequenceSignals: { finalHomeChecked: true, changedAt: '2026-07-10T10:11:12Z' } }));
 
     expect(differentVersion.cacheKey).not.toBe(base.cacheKey);
     expect(critical.cacheKey).not.toBe(base.cacheKey);
-    expect(finalStep.cacheKey).not.toBe(base.cacheKey);
+    expect(noPendingAgenda.cacheKey).not.toBe(base.cacheKey);
+    expect(legacyTestSignalsOnly.cacheKey).toBe(base.cacheKey);
   });
 
   test('canonical excludes exact timestamps, ids, raw routes and free text', () => {

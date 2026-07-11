@@ -16,18 +16,12 @@ const PROMPT_SEVERITIES = ['low', 'medium', 'high', 'critical'];
 function buildPromptOperationalContext(operationalContext = {}) {
   const dashboardState = operationalContext.dashboardState || {};
   const agendaState = operationalContext.agendaState || {};
-  const nextActivity = agendaState.nextActivity || {};
   const productionState = operationalContext.productionState || {};
   const cultivationState = operationalContext.cultivationState || {};
   const teamState = operationalContext.teamState || {};
   const alertState = operationalContext.alertState || {};
   const reservoirState = operationalContext.reservoirState || {};
   const fieldNotebookState = operationalContext.fieldNotebookState || {};
-  const infoCardsState = operationalContext.infoCardsState || {};
-  const todayCultivation = infoCardsState.todayCultivation || {};
-  const reservoirReport = infoCardsState.reservoirReport || {};
-  const dayProgress = infoCardsState.dayProgress || {};
-  const fieldNotesSummary = infoCardsState.fieldNotesSummary || {};
   return {
     generatedAt: operationalContext.generatedAt || null,
     dashboardState: {
@@ -40,21 +34,18 @@ function buildPromptOperationalContext(operationalContext = {}) {
     },
     agendaState: {
       hasGeneratedActivities: agendaState.hasGeneratedActivities === true,
-      pendingActivitiesTodayCount: agendaState.pendingActivitiesTodayCount || 0,
+      pendingToday: agendaState.pendingToday || 0,
       pendingActivitiesWeekCount: agendaState.pendingActivitiesWeekCount || 0,
-      overdueActivitiesCount: agendaState.overdueActivitiesCount || 0,
+      overdueCount: agendaState.overdueCount || 0,
+      hasOverdue: agendaState.hasOverdue === true,
       completedActivitiesTodayCount: agendaState.completedActivitiesTodayCount || 0,
-      dueBuckets: agendaState.dueBuckets || {},
       priorityBuckets: agendaState.priorityBuckets || {},
-      lastInteractionType: agendaState.lastInteractionType || null,
-      nextActivity: {
-        title: nextActivity.title || null,
-        description: nextActivity.description || null,
-        type: nextActivity.type || null,
-        status: nextActivity.status || null,
-        dueLabel: nextActivity.dueLabel || null,
-        overdue: nextActivity.overdue === true,
-      },
+      lastAgendaInteraction: agendaState.lastAgendaInteraction || null,
+      nextActivityType: agendaState.nextActivityType || null,
+      nextActivityStatus: agendaState.nextActivityStatus || null,
+      nextActivityDueLabel: agendaState.nextActivityDueLabel || null,
+      nextActivityOverdue: agendaState.nextActivityOverdue === true,
+      hasProtocolTasks: agendaState.hasProtocolTasks === true,
     },
     productionState: {
       hasProductionData: productionState.hasProductionData === true,
@@ -65,9 +56,9 @@ function buildPromptOperationalContext(operationalContext = {}) {
       topCulture: productionState.topCulture || null,
     },
     cultivationState: {
-      culturesCount: (cultivationState.cultures || []).length,
+      culturesCount: cultivationState.culturesCount || 0,
       dominantCulture: cultivationState.dominantCulture || null,
-      speciesInProgressCount: (cultivationState.speciesInProgress || []).length,
+      speciesInProgressCount: cultivationState.speciesInProgressCount || 0,
     },
     teamState: {
       activeMembers: teamState.activeMembers || 0,
@@ -92,44 +83,18 @@ function buildPromptOperationalContext(operationalContext = {}) {
       highlightedReservoirsCount: (reservoirState.highlightedReservoirs || []).length,
     },
     fieldNotebookState: {
-      hasRecentNutritionAdjustmentRecord: fieldNotebookState.hasRecentNutritionAdjustmentRecord === true,
-      hasRecentFieldNotes: fieldNotebookState.hasRecentFieldNotes === true,
+      hasNutritionAdjustmentRecord: fieldNotebookState.hasNutritionAdjustmentRecord === true,
+      hasRecentNotes: fieldNotebookState.hasRecentNotes === true,
       totalRecentNotes: fieldNotebookState.totalRecentNotes || 0,
       latestRecordType: fieldNotebookState.latestRecordType || null,
       latestNotesCount: (fieldNotebookState.latestNotes || []).length,
-      sowingNotePresent: fieldNotebookState.sowingNotePresent === true,
+      hasSowingNote: fieldNotebookState.hasSowingNote === true,
     },
-    infoCardsState: {
-      todayCultivation: {
-        tasksToday: todayCultivation.tasksToday || 0,
-        overdueTasks: todayCultivation.overdueTasks || 0,
-        nextTasksCount: (todayCultivation.nextTasks || []).length,
-        pendingToday: todayCultivation.pendingToday || 0,
-        overdue: todayCultivation.overdue || 0,
-        activeLots: todayCultivation.activeLots || 0,
-        upcomingHarvests: todayCultivation.upcomingHarvests || 0,
-        alerts: todayCultivation.alerts || 0,
-      },
-      reservoirReport: {
-        totalCount: reservoirReport.totalCount || 0,
-        withSolutionCount: reservoirReport.withSolutionCount || 0,
-        withoutSolutionCount: reservoirReport.withoutSolutionCount || 0,
-      },
-      dayProgress: {
-        totalTasksToday: dayProgress.totalTasksToday || 0,
-        completedTasksToday: dayProgress.completedTasksToday || 0,
-        pendingTasksToday: dayProgress.pendingTasksToday || 0,
-        total: dayProgress.total || 0,
-        completed: dayProgress.completed || 0,
-        pending: dayProgress.pending || 0,
-        overdue: dayProgress.overdue || 0,
-      },
-      fieldNotesSummary: {
-        totalRecentNotes: fieldNotesSummary.totalRecentNotes || fieldNotesSummary.total || 0,
-        latestNotesCount: (fieldNotesSummary.latestNotes || []).length,
-      },
-    },
-    testSequenceSignals: operationalContext.testSequenceSignals || {},
+    recentUserActions: (operationalContext.recentUserActions || []).map((action) => ({
+      entityType: action.entityType,
+      action: action.action,
+      timestamp: action.timestamp,
+    })),
   };
 }
 
@@ -141,7 +106,6 @@ function buildInstantPrompt({ navigationContext, sessionNavigations, operational
   }));
 
   const agendaState = operationalContext.agendaState || {};
-  const currentActivity = agendaState.nextActivity || {};
   const maxShortcuts = Math.max(1, clientCapabilities.maxShortcuts || 3);
 
   const promptPayload = {
@@ -149,11 +113,10 @@ function buildInstantPrompt({ navigationContext, sessionNavigations, operational
     sessionNavigations,
     operationalContext: buildPromptOperationalContext(operationalContext),
     currentActivityContext: {
-      title: currentActivity.title || null,
-      description: currentActivity.description || null,
-      type: currentActivity.type || null,
-      status: currentActivity.status || null,
-      dueLabel: currentActivity.dueLabel || null,
+      type: agendaState.nextActivityType || null,
+      status: agendaState.nextActivityStatus || null,
+      dueLabel: agendaState.nextActivityDueLabel || null,
+      overdue: agendaState.nextActivityOverdue === true,
     },
     stepContext: {
       stepId: signals.stepId,
@@ -191,10 +154,8 @@ REGRAS DE ROTAS:
 - Os demais shortcuts (segundo em diante) DEVEM ter rotas diferentes entre si e diferentes de targetRoute.
 - infoRecommendation.ctaRoute DEVE ser diferente de targetRoute e do primeiro shortcut.
 
-Contexto da atividade atual disponível em currentActivityContext.
-Use title e description para contextualizar as recomendações (title, description, actionLabel, reason).
-NÃO repita o título da atividade como texto livre se ele contiver dados identificáveis.
-Prefira generalizar: "Aplicação de nutrientes" → "atividade de aplicação".
+Contexto técnico da próxima atividade disponível em currentActivityContext.
+Use apenas tipo, status, prazo e flags; não invente nem repita nomes de entidades.
 
 Retorne APENAS JSON válido, sem markdown, seguindo o schema obrigatório:
 {
@@ -218,15 +179,6 @@ REGRAS:
 - infoRecommendation.type deve usar um dos tipos permitidos.
 - infoRecommendation.ctaRoute deve estar na allowlist da Info.
 - shortcuts[].route deve estar em allowedRoutes.
-
-Quando stepContext.priority = "mandatory_test_sequence":
-- Use OBRIGATORIAMENTE stepContext.targetRoute em nextStepPrediction.targetRoute.
-- O primeiro shortcut pode repetir stepContext.targetRoute.
-- Os shortcuts seguintes DEVEM seguir stepContext.requiredShortcutRoutes na ordem informada.
-- Use stepContext.focusMessage como base para mensagem do FocusBanner.
-- Use stepContext.expectedInfoType para infoRecommendation.type (se não suportado, use fallback).
-- NÃO recomende rotas fora de stepContext.requiredShortcutRoutes.
-- NÃO inclua progress bar, stepper, checklist ou equivalente.
 
 JSON de contexto sanitizado:
 ${JSON.stringify(promptPayload)}`;

@@ -6,7 +6,7 @@ const { buildEnhancedInstantFallback } = require('../../src/instantFallbackBuild
 const { normalizeInstantResponse } = require('../../src/instantResponseNormalizer');
 const { validateInstantResponse, validateRawInstantResponse, finalizeValidInstantResponse } = require('../../src/instantResponseValidator');
 const { buildEnhancedInstantRecommendation } = require('../../src/enhancedInstantMode');
-const { resolveRouteConflicts } = require('../../src/instantInfoRecommendationBuilder');
+const { buildInfoRecommendationFallback, resolveRouteConflicts } = require('../../src/instantInfoRecommendationBuilder');
 const { ENHANCED_INSTANT_METRIC_EVENTS, getSupportedMetricEventsSqlList } = require('../../src/adaptiveMetrics');
 
 function capabilities(overrides = {}) {
@@ -76,11 +76,11 @@ function geminiResponse(overrides = {}) {
     reasonDetails: { summary: 'Contexto operacional.', details: ['RULE-003'], display: 'info_icon' },
     rulesApplied: ['RULE-003'],
     infoRecommendation: {
-      type: 'field_notes_summary',
+      type: 'today_cultivation',
       source: 'isis',
       priority: 'high',
-      title: 'Resumo do caderno',
-      reason: 'Há registros operacionais recentes para conferir.',
+      title: 'Cultivo de hoje',
+      reason: 'Há uma ação de cultivo para priorizar agora.',
       ctaRoute: '/relatoriosPage',
       category: 'caderno_campo',
     },
@@ -158,12 +158,134 @@ describe('INSTANT route recommendation', () => {
 
     expect(normalized.generatedAt).toBe('2026-07-07T12:34:56.000Z');
     expect(normalized.unknownSection).toBeUndefined();
+    expect(normalized.agendaState.lastAgendaInteraction).toBe('completed');
     expect(normalized.agendaState.lastInteractionType).toBe('completed');
     expect(normalized.agendaState.lastActivityTitle).toBe('Aplicação de nutrientes');
     expect(normalized.agendaState.nextActivity.title).toBe('Irrigação');
     expect(normalized.agendaState.nextActivity.description).toBe('Verificar linhas');
+    expect(normalized.fieldNotebookState.hasRecentNotes).toBe(true);
     expect(normalized.testSequenceSignals.adjustmentRecorded).toBe(true);
     expect(normalized.infoCardsState.dayProgress.label).toBe('Metade do dia');
+  });
+
+  test('validator accepts slim payload and sanitizes recent user actions', () => {
+    const normalized = normalizeOperationalContext({
+      dashboardState: { hasActiveLots: true, hasProtocolLinkedToLatestLot: true, hasUpcomingHarvests: false },
+      agendaState: {
+        hasGeneratedActivities: true,
+        pendingToday: 2,
+        overdueCount: 1,
+        hasOverdue: true,
+        nextActivityType: 'protocol_activity',
+        nextActivityStatus: 'pending',
+        nextActivityDueLabel: 'hoje',
+        nextActivityOverdue: false,
+        hasProtocolTasks: true,
+        lastAgendaInteraction: 'viewed',
+      },
+      fieldNotebookState: {
+        hasRecentNotes: true,
+        hasNutritionAdjustmentRecord: false,
+        totalRecentNotes: 3,
+        hasSowingNote: true,
+      },
+      cultivationState: { culturesCount: 4, speciesInProgressCount: 2 },
+      recentUserActions: [{
+        entityType: 'lot',
+        action: 'viewed',
+        entityId: 'lot-1',
+        entityName: 'Lote sensível',
+        timestamp: '2026-07-07T12:34:56Z',
+      }, {
+        entityType: 'activity',
+        action: 'completed Maria CPF 123',
+        timestamp: '2026-07-07T12:34:56Z',
+      }],
+    });
+
+    expect(normalized.agendaState).toMatchObject({
+      pendingToday: 2,
+      overdueCount: 1,
+      hasOverdue: true,
+      nextActivityType: 'protocol_activity',
+      nextActivityStatus: 'pending',
+      nextActivityDueLabel: 'today',
+      nextActivityOverdue: false,
+      hasProtocolTasks: true,
+      lastAgendaInteraction: 'viewed',
+    });
+    expect(normalized.fieldNotebookState).toMatchObject({
+      hasRecentNotes: true,
+      hasNutritionAdjustmentRecord: false,
+      hasSowingNote: true,
+    });
+    expect(normalized.cultivationState).toMatchObject({ culturesCount: 4, speciesInProgressCount: 2 });
+    expect(normalized.recentUserActions).toEqual([{ entityType: 'lot', action: 'viewed', timestamp: '2026-07-07T12:34:56.000Z', entityId: 'lot-1' }]);
+    expect(JSON.stringify(normalized.recentUserActions)).not.toContain('entityName');
+    expect(JSON.stringify(normalized.recentUserActions)).not.toContain('Lote sensível');
+  });
+
+  test('validator maps legacy aliases to slim normalized names', () => {
+    const normalized = normalizeOperationalContext({
+      agendaState: {
+        pendingActivitiesTodayCount: 5,
+        overdueActivitiesCount: 2,
+        dueBuckets: { today: 7, overdue: 3 },
+        lastInteractionType: 'completed',
+        nextActivity: { type: 'irrigation', status: 'pending', dueLabel: 'amanhã', overdue: true },
+        latestTasks: [{ type: 'protocol_activity' }],
+      },
+      fieldNotebookState: {
+        hasRecentFieldNotes: true,
+        hasRecentNutritionAdjustmentRecord: true,
+        sowingNotePresent: true,
+      },
+      cultivationState: { cultures: [{ name: 'Alface' }, { name: 'Rúcula' }], speciesInProgress: ['Alface'] },
+    });
+
+    expect(normalized.agendaState.pendingToday).toBe(5);
+    expect(normalized.agendaState.overdueCount).toBe(2);
+    expect(normalized.agendaState.hasOverdue).toBe(true);
+    expect(normalized.agendaState.lastAgendaInteraction).toBe('completed');
+    expect(normalized.agendaState.nextActivityType).toBe('irrigation');
+    expect(normalized.agendaState.nextActivityStatus).toBe('pending');
+    expect(normalized.agendaState.nextActivityDueLabel).toBe('tomorrow');
+    expect(normalized.agendaState.nextActivityOverdue).toBe(true);
+    expect(normalized.agendaState.hasProtocolTasks).toBe(true);
+    expect(normalized.fieldNotebookState.hasRecentNotes).toBe(true);
+    expect(normalized.fieldNotebookState.hasNutritionAdjustmentRecord).toBe(true);
+    expect(normalized.fieldNotebookState.hasSowingNote).toBe(true);
+    expect(normalized.cultivationState.culturesCount).toBe(2);
+    expect(normalized.cultivationState.speciesInProgressCount).toBe(1);
+  });
+
+  test('prompt includes sanitized recent user actions without entity names', () => {
+    const normalized = normalizeOperationalContext({
+      dashboardState: { hasActiveLots: true, hasProtocolLinkedToLatestLot: true },
+      agendaState: { hasGeneratedActivities: true, pendingToday: 0 },
+      recentUserActions: [{
+        entityType: 'activity',
+        action: 'completed',
+        entityId: 'activity-1',
+        entityName: 'Atividade da Maria CPF 123',
+        timestamp: '2026-07-07T12:34:56Z',
+      }],
+    });
+    const prompt = buildInstantPrompt({
+      navigationContext: { currentRoute: '/homePage', recentRoutes: [] },
+      sessionNavigations: [],
+      operationalContext: normalized,
+      clientCapabilities: capabilities(),
+      signals: deriveInstantSignals(normalized),
+    });
+
+    expect(prompt).toContain('recentUserActions');
+    expect(prompt).toContain('activity');
+    expect(prompt).toContain('completed');
+    expect(prompt).not.toContain('entityName');
+    expect(prompt).not.toContain('Atividade da Maria');
+    expect(prompt).not.toContain('CPF 123');
+    expect(prompt).not.toContain('activity-1');
   });
 
   test('compact prompt context summarizes enriched arrays', () => {
@@ -185,10 +307,7 @@ describe('INSTANT route recommendation', () => {
     expect(compact.productionState.monthlyProductionCount).toBe(1);
     expect(compact.reservoirState.highlightedReservoirsCount).toBe(1);
     expect(compact.fieldNotebookState.latestNotesCount).toBe(1);
-    expect(compact.infoCardsState.todayCultivation.nextTasksCount).toBe(1);
-    expect(compact.infoCardsState.todayCultivation.nextTasks).toBeUndefined();
-    expect(compact.infoCardsState.fieldNotesSummary.latestNotesCount).toBe(1);
-    expect(compact.infoCardsState.fieldNotesSummary.latestNotes).toBeUndefined();
+    expect(compact.infoCardsState).toBeUndefined();
   });
 
   test('resolveRouteConflicts ensures unique routes', () => {
@@ -213,7 +332,7 @@ describe('INSTANT route recommendation', () => {
   });
 
   test('resolveRouteConflicts updates shortcut text when route is remapped', () => {
-    const resolved = resolveRouteConflicts('test_complete', '/relatoriosPage', '/agendaPage', [
+    const resolved = resolveRouteConflicts('review_final_home', '/relatoriosPage', '/agendaPage', [
       {
         route: '/agendaPage',
         label: 'Agenda',
@@ -226,10 +345,10 @@ describe('INSTANT route recommendation', () => {
 
     expect(resolved.shortcuts).toHaveLength(1);
     expect(resolved.shortcuts[0]).toMatchObject({
-      route: '/protocoloPage',
-      label: 'Abrir Protocolos',
-      description: 'Cadastre e gerencie protocolos.',
-      reason: 'Cadastre e gerencie protocolos.',
+      route: '/solucaoPage',
+      label: 'Ver Solução',
+      description: 'Consulte a solução aplicada ao cultivo.',
+      reason: 'Consulte a solução aplicada ao cultivo.',
       confidence: 0.5,
       group: 'secondary',
     });
@@ -247,7 +366,7 @@ describe('INSTANT route recommendation', () => {
       confidence: 0.5,
       group: 'contextual',
     };
-    const resolved = resolveRouteConflicts('test_complete', '/relatoriosPage', '/agendaPage', [shortcut]);
+    const resolved = resolveRouteConflicts('review_final_home', '/relatoriosPage', '/agendaPage', [shortcut]);
 
     expect(resolved.shortcuts).toEqual([shortcut]);
   });
@@ -260,6 +379,40 @@ describe('INSTANT route recommendation', () => {
     const routes = [fallback.nextStepPrediction.targetRoute, fallback.infoRecommendation.ctaRoute, ...fallback.shortcuts.map((s) => s.route)];
     const unique = [...new Set(routes)];
     expect(unique.length).toBeGreaterThanOrEqual(routes.length - 1);
+  });
+
+  test('fallback info mappings follow natural Home flow', () => {
+    const cases = [
+      { rulesApplied: ['RULE-001'], type: 'basic_tip' },
+      { rulesApplied: ['RULE-002'], type: 'today_cultivation' },
+      { rulesApplied: ['RULE-003'], type: 'today_cultivation' },
+      { rulesApplied: ['RULE-004'], type: 'field_notes_summary' },
+      { rulesApplied: ['RULE-005'], type: 'basic_tip' },
+    ];
+
+    for (const item of cases) {
+      const result = buildInfoRecommendationFallback({ signals: item, clientCapabilities: capabilities() });
+      expect(result.type).toBe(item.type);
+    }
+  });
+
+  test('RULE-005 mapping wins over completed agenda interaction override', () => {
+    const result = buildInfoRecommendationFallback({
+      signals: { rulesApplied: ['RULE-005'] },
+      clientCapabilities: capabilities(),
+      operationalContext: context({
+        agendaState: {
+          hasGeneratedActivities: true,
+          pendingToday: 0,
+          completedActivitiesTodayCount: 2,
+          lastAgendaInteraction: 'completed',
+        },
+      }),
+    });
+
+    expect(result.type).toBe('basic_tip');
+    expect(result.category).toBe('geral');
+    expect(result.ctaRoute).toBe('/relatoriosPage');
   });
 
   test('finalizeValidInstantResponse applies conflict resolver', () => {

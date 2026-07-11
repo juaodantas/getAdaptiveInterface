@@ -100,11 +100,8 @@ function validValidationShape(overrides = {}) {
 // ---------------------------------------------------------------------------
 
 describe('STEP_IDS_WITH_ONBOARDING constant', () => {
-  test('contains create_lot_with_protocol and test_create_lot_with_protocol', () => {
-    expect(STEP_IDS_WITH_ONBOARDING).toEqual([
-      'create_lot_with_protocol',
-      'test_create_lot_with_protocol',
-    ]);
+  test('contains only create_lot_with_protocol', () => {
+    expect(STEP_IDS_WITH_ONBOARDING).toEqual(['create_lot_with_protocol']);
   });
 
   test('const variable cannot be reassigned', () => {
@@ -168,25 +165,14 @@ describe('Scenario 1: create_lot_with_protocol with OperationalOnboardingCard ca
 });
 
 // ---------------------------------------------------------------------------
-// Scenario 2 — stepId = test_create_lot_with_protocol, capability present
+// Scenario 2 — legacy test_create_lot_with_protocol is not an onboarding step
 // ---------------------------------------------------------------------------
 
 describe('Scenario 2: test_create_lot_with_protocol with OperationalOnboardingCard capability', () => {
-  test('normalizeOperationalOnboarding returns fallback with test-specific reason and route', () => {
+  test('normalizeOperationalOnboarding returns null', () => {
     const result = normalizeOperationalOnboarding(null, testSignals(), capabilities());
 
-    expect(result).not.toBeNull();
-    expect(result.title).toBe('Como começar');
-    expect(result.message).toBe('Crie seu primeiro lote com protocolo para iniciar o acompanhamento.');
-    expect(result.steps).toEqual([
-      'Cadastre ou selecione um protocolo',
-      'Crie o primeiro lote',
-      'Acompanhe as atividades geradas na agenda',
-    ]);
-    expect(result.ctaLabel).toBe('Criar primeiro lote');
-    expect(result.targetRoute).toBe('/lotePage');
-    expect(result.reason).toBe('[Test] Criar primeiro lote com protocolo.');
-    expect(result.priority).toBe(20);
+    expect(result).toBeNull();
   });
 });
 
@@ -312,9 +298,7 @@ describe('Scenario 8: no Gemini operationalOnboarding but matching stepId', () =
   test('normalizeOperationalOnboarding uses fallback when raw is undefined', () => {
     const result = normalizeOperationalOnboarding(undefined, testSignals(), capabilities());
 
-    expect(result).not.toBeNull();
-    expect(result.title).toBe('Como começar');
-    expect(result.targetRoute).toBe('/lotePage');
+    expect(result).toBeNull();
   });
 });
 
@@ -478,22 +462,10 @@ describe('Scenario 14: buildOperationalOnboardingFallback with matching stepId',
     });
   });
 
-  test('returns full shape with test_create_lot_with_protocol signals', () => {
+  test('returns null with test_create_lot_with_protocol signals', () => {
     const result = buildOperationalOnboardingFallback({ signals: testSignals() });
 
-    expect(result).toEqual({
-      title: 'Como começar',
-      message: 'Crie seu primeiro lote com protocolo para iniciar o acompanhamento.',
-      steps: [
-        'Cadastre ou selecione um protocolo',
-        'Crie o primeiro lote',
-        'Acompanhe as atividades geradas na agenda',
-      ],
-      ctaLabel: 'Criar primeiro lote',
-      priority: 20,
-      targetRoute: '/lotePage',
-      reason: '[Test] Criar primeiro lote com protocolo.',
-    });
+    expect(result).toBeNull();
   });
 
   test('falls back to default route when signals.targetRoute is missing', () => {
@@ -550,12 +522,11 @@ describe('normalizeOperationalOnboarding with valid Gemini input', () => {
     });
   });
 
-  test('preserves test-specific targetRoute from Gemini when valid', () => {
+  test('returns null for legacy test-specific targetRoute from Gemini', () => {
     const raw = validGeminiInput({ targetRoute: '/lotePage', priority: 50 });
     const result = normalizeOperationalOnboarding(raw, testSignals(), capabilities());
 
-    expect(result.targetRoute).toBe('/lotePage');
-    expect(result.priority).toBe(50);
+    expect(result).toBeNull();
   });
 });
 

@@ -35,11 +35,6 @@ const STEP_COPY = {
     description: 'Todas as atividades foram concluídas. Revise o resumo final pela Home.',
     actionLabel: 'Ver Relatórios',
   },
-  test_complete: {
-    title: 'Roteiro de teste concluído',
-    description: 'Você completou todas as etapas do roteiro. Confira o resumo nos relatórios.',
-    actionLabel: 'Ver Relatórios',
-  },
   review_critical_alerts: {
     title: 'Revise alertas operacionais críticos',
     description: 'Há alertas críticos que devem receber prioridade antes de continuar.',
@@ -79,36 +74,6 @@ const STEP_COPY = {
     title: 'Revise a saúde da equipe',
     description: 'Há sinais operacionais de equipe para acompanhar.',
     actionLabel: 'Abrir Equipe',
-  },
-  test_create_lot_with_protocol: {
-    title: 'Cadastre um lote com protocolo',
-    description: 'Comece criando seu primeiro lote vinculando um protocolo.',
-    actionLabel: 'Criar Lote',
-  },
-  test_check_generated_activities: {
-    title: 'Verifique as atividades na Agenda',
-    description: 'Confira na Agenda as atividades geradas para o primeiro dia.',
-    actionLabel: 'Abrir Agenda',
-  },
-  test_record_adjustment: {
-    title: 'Registre atividade no Caderno de Campo',
-    description: 'Registre a execução da atividade no caderno de campo.',
-    actionLabel: 'Abrir Caderno',
-  },
-  test_finish_agenda: {
-    title: 'Conclua as pendências na Agenda',
-    description: 'O registro foi feito. Finalize as atividades do dia na Agenda.',
-    actionLabel: 'Abrir Agenda',
-  },
-  test_review_final_home: {
-    title: 'Revise o lote em acompanhamento',
-    description: 'Todas as atividades foram concluídas. Acompanhe o lote.',
-    actionLabel: 'Ver Lote',
-  },
-  test_complete: {
-    title: 'Roteiro de teste concluído',
-    description: 'Você completou todas as etapas do roteiro de teste.',
-    actionLabel: 'Ver Relatórios',
   },
 };
 
