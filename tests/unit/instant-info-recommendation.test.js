@@ -22,7 +22,6 @@ function context(overrides = {}) {
   return normalizeOperationalContext({
     dashboardState: { hasProtocolLinkedToLatestLot: true },
     agendaState: { hasGeneratedActivities: true, pendingActivitiesTodayCount: 2 },
-    testSequenceSignals: { lotWithProtocolCreated: true, generatedActivitiesSeen: false },
     ...overrides,
   });
 }
@@ -31,7 +30,15 @@ function cadernoContext(overrides = {}) {
   return normalizeOperationalContext({
     dashboardState: { hasProtocolLinkedToLatestLot: true },
     agendaState: { hasGeneratedActivities: true, pendingActivitiesTodayCount: 2, nextActivity: { title: 'Registre uma atividade no caderno de campo', type: 'nutritional_adjustment', status: 'pending', dueLabel: 'Hoje' } },
-    testSequenceSignals: { lotWithProtocolCreated: true, generatedActivitiesSeen: true, adjustmentRecorded: false },
+    ...overrides,
+  });
+}
+
+function testContext(overrides = {}) {
+  return normalizeOperationalContext({
+    dashboardState: { hasProtocolLinkedToLatestLot: true },
+    agendaState: { hasGeneratedActivities: true, pendingActivitiesTodayCount: 2 },
+    testSequenceSignals: { experimentActive: true, lotWithProtocolCreated: true, generatedActivitiesSeen: false },
     ...overrides,
   });
 }

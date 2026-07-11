@@ -15,7 +15,6 @@ function validContext(overrides = {}) {
   return normalizeOperationalContext({
     dashboardState: { hasProtocolLinkedToLatestLot: true },
     agendaState: { hasGeneratedActivities: true, pendingActivitiesTodayCount: 3 },
-    testSequenceSignals: { lotWithProtocolCreated: true, generatedActivitiesSeen: false },
     ...overrides,
   });
 }
@@ -24,7 +23,15 @@ function cadernoContext(overrides = {}) {
   return normalizeOperationalContext({
     dashboardState: { hasProtocolLinkedToLatestLot: true },
     agendaState: { hasGeneratedActivities: true, pendingActivitiesTodayCount: 2, nextActivity: { title: 'Registre no caderno', type: 'nutritional_adjustment', status: 'pending' } },
-    testSequenceSignals: { lotWithProtocolCreated: true, generatedActivitiesSeen: true, adjustmentRecorded: false },
+    ...overrides,
+  });
+}
+
+function testContext(overrides = {}) {
+  return normalizeOperationalContext({
+    dashboardState: { hasProtocolLinkedToLatestLot: true },
+    agendaState: { hasGeneratedActivities: true, pendingActivitiesTodayCount: 3 },
+    testSequenceSignals: { experimentActive: true, lotWithProtocolCreated: true, generatedActivitiesSeen: false },
     ...overrides,
   });
 }
@@ -89,7 +96,7 @@ function finalizedRecommendation(ctx = cadernoContext(), caps = validCapabilitie
   return finalizeValidInstantResponse(normalized, caps, signals);
 }
 
-function cacheEntryFor(ctx = cadernoContext(), caps = validCapabilities(), recommendation = finalizedRecommendation(ctx, caps), now = new Date('2026-07-10T00:00:00Z')) {
+function cacheEntryFor(ctx = cadernoContext(), caps = validCapabilities(), recommendation = finalizedRecommendation(ctx, caps), now = new Date()) {
   const signals = deriveInstantSignals(ctx);
   const lookup = buildCacheLookup({ operationalContext: ctx, signals, clientCapabilities: caps, navigationContext: { currentRoute: null, recentRoutes: [] } });
   return buildCacheEntry({ lookup, recommendation, now }).entry;

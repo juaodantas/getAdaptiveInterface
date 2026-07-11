@@ -115,6 +115,8 @@ async function buildEnhancedInstantRecommendation({
   const sanitizedSessionNavigations = sanitizeSessionNavigations(sessionNavigations);
   const signals = deriveInstantSignals(operationalContext);
   const fallbackInput = { operationalContext, clientCapabilities };
+  const isTestSequence = signals.stepId && signals.stepId.startsWith('test_');
+
   const cacheLookup = buildCacheLookup({ operationalContext, signals, clientCapabilities, navigationContext });
   const cachedRecommendation = await readInstantCache({
     instantRecommendationCache,
@@ -125,6 +127,18 @@ async function buildEnhancedInstantRecommendation({
 
   if (cachedRecommendation) {
     return cachedRecommendation;
+  }
+
+  // Durante a sequência de teste (stepId com prefixo "test_"), a recomendação
+  // é 100% determinística — as regras de domínio já definem exatamente qual
+  // o passo atual, targetRoute, shortcuts, focusMessage e expectedInfoType.
+  // Chamar Gemini seria desnecessário e introduziria inconsistência.
+  // Usa o fallback determinístico diretamente.
+  if (isTestSequence) {
+    return buildEnhancedInstantFallback({
+      ...fallbackInput,
+      reason: 'test_sequence_deterministic',
+    });
   }
 
   const prompt = buildInstantPrompt({

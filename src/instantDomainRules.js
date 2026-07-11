@@ -299,20 +299,45 @@ function deriveInstantSignals(context) {
   const sequence = context.testSequenceSignals;
   const rulesApplied = [RULE_IDS.NO_PROGRESS_BAR];
 
-  // Sinais efetivos: combinam o que veio da sessão (testSequenceSignals)
-  // com o que é objetivamente constatável do estado persistente (dashboard, agenda, notebook).
-  // Isso protege contra perda de progresso quando o usuário faz logout (os sinais de sessão
-  // são zerados, mas o estado do servidor permanece).
-  const effective = {
-    lotWithProtocolCreated: sequence.lotWithProtocolCreated
-      || dashboard.hasProtocolLinkedToLatestLot
-      || (dashboard.hasActiveLots && agenda.hasGeneratedActivities),
-    generatedActivitiesSeen: sequence.generatedActivitiesSeen
-      || (agenda.hasGeneratedActivities && (dashboard.hasProtocolLinkedToLatestLot || dashboard.hasActiveLots)),
-    adjustmentRecorded: sequence.adjustmentRecorded || notebook.hasRecentNutritionAdjustmentRecord,
-    agendaActivitiesCompleted: sequence.agendaActivitiesCompleted || agenda.lastInteractionType === 'completed',
-    finalHomeChecked: sequence.finalHomeChecked,
-  };
+  // Detecta se a sequência de teste está ativa.
+  // Pode ser ativada por:
+  //   1. experimentActive === true (flag explícita enviada pelo app quando modo INSTANT está ativo)
+  //   2. lastRelevantEvent !== null (pelo menos um evento de sequência já foi registrado)
+  //   3. Qualquer sinal de progresso já atingido (recuperação após reset de sessão)
+  const hasActiveTestSequence = sequence && (
+    sequence.experimentActive === true
+    || sequence.lastRelevantEvent !== null
+    || sequence.lotWithProtocolCreated
+    || sequence.generatedActivitiesSeen
+    || sequence.adjustmentRecorded
+    || sequence.agendaActivitiesCompleted
+    || sequence.finalHomeChecked
+  );
+
+  // Sinais efetivos:
+  // Durante a sequência de teste, usa APENAS os sinais de sessão (testSequenceSignals),
+  // sem merge com estado persistente do dashboard. Isso garante que o roteiro controlado
+  // do experimento siga fielmente os passos definidos, ignorando dados reais da conta.
+  // Fora do experimento, combina sinais de sessão com estado do dashboard como fallback
+  // para proteger contra perda de progresso em caso de logout.
+  const effective = hasActiveTestSequence
+    ? {
+        lotWithProtocolCreated: sequence.lotWithProtocolCreated === true,
+        generatedActivitiesSeen: sequence.generatedActivitiesSeen === true,
+        adjustmentRecorded: sequence.adjustmentRecorded === true,
+        agendaActivitiesCompleted: sequence.agendaActivitiesCompleted === true,
+        finalHomeChecked: sequence.finalHomeChecked === true,
+      }
+    : {
+        lotWithProtocolCreated: sequence.lotWithProtocolCreated
+          || dashboard.hasProtocolLinkedToLatestLot
+          || (dashboard.hasActiveLots && agenda.hasGeneratedActivities),
+        generatedActivitiesSeen: sequence.generatedActivitiesSeen
+          || (agenda.hasGeneratedActivities && (dashboard.hasProtocolLinkedToLatestLot || dashboard.hasActiveLots)),
+        adjustmentRecorded: sequence.adjustmentRecorded || notebook.hasRecentNutritionAdjustmentRecord,
+        agendaActivitiesCompleted: sequence.agendaActivitiesCompleted || agenda.lastInteractionType === 'completed',
+        finalHomeChecked: sequence.finalHomeChecked,
+      };
 
   const hasTodayTasks = agenda.pendingActivitiesTodayCount > 0
     || agenda.dueBuckets?.today > 0
@@ -351,10 +376,8 @@ function deriveInstantSignals(context) {
     && !notebook.hasRecentNutritionAdjustmentRecord;
 
   // Priority 0: Test sequence — overrides everything during experiment
-  // Ativado quando o app envia lastRelevantEvent não-nulo, indicando
-  // que os sinais de sequência foram explicitamente inicializados.
-  const testSeq = context.testSequenceSignals;
-  const hasActiveTestSequence = testSeq && (testSeq.lastRelevantEvent !== null || testSeq.lotWithProtocolCreated || testSeq.generatedActivitiesSeen || testSeq.adjustmentRecorded || testSeq.agendaActivitiesCompleted || testSeq.finalHomeChecked);
+  // Detectado no bloco de sinais efetivos acima (hasActiveTestSequence).
+  // A variável já foi definida junto com o bloco de sinais efetivos.
   if (hasActiveTestSequence) {
     const testStep = resolveTestSequenceStep(effective);
     if (testStep) {
