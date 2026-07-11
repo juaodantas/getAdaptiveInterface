@@ -684,7 +684,7 @@ function normalizeRecommendation(raw) {
   }
 
   // Normaliza os shortcuts
-  const normalizedShortcuts = (raw.shortcuts || []).slice(0, 4).map((s) => ({
+  const normalizedShortcuts = (raw.shortcuts || []).slice(0, 3).map((s) => ({
     route: s.route || s.predicted_target_screen || "",
     confidence: Math.max(0, Math.min(1, parseFloat(s.confidence || s.prob) || 0.5)),
     resourceId: s.resourceId || null,

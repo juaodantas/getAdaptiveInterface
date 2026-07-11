@@ -128,7 +128,7 @@ describe('INSTANT route recommendation', () => {
     expect(validation.errors).toContain('missing_info_recommendation');
   });
 
-  test('normalizer respects client maxShortcuts up to 4', () => {
+  test('normalizer caps shortcuts to SAFE_LIMITS maxShortcuts', () => {
     const signals = deriveInstantSignals(cadernoContext());
     const manyShortcuts = geminiResponse({
       shortcuts: [
@@ -140,7 +140,7 @@ describe('INSTANT route recommendation', () => {
       ],
     });
     const normalized = normalizeInstantResponse(manyShortcuts, capabilities({ maxShortcuts: 4 }), signals, cadernoContext());
-    expect(normalized.shortcuts.length).toBe(4);
+    expect(normalized.shortcuts.length).toBe(3);
   });
 
   test('validator preserves enriched operational context contract fields', () => {
