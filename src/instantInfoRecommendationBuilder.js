@@ -262,12 +262,8 @@ function resolveRouteConflicts(stepId, nextStepRoute, infoCtaRoute, shortcuts) {
   if (resolvedInfoCta) usedRoutes.add(resolvedInfoCta);
   if (nextStepRoute) usedRoutes.add(nextStepRoute);
 
-  const resolvedShortcuts = (shortcuts || []).map((sc, index) => {
+  const resolvedShortcuts = (shortcuts || []).map((sc) => {
     if (!sc || !sc.route) return sc;
-    if (index === 0 && sc.route === nextStepRoute) {
-      usedRoutes.add(sc.route);
-      return sc;
-    }
     if (!usedRoutes.has(sc.route)) {
       usedRoutes.add(sc.route);
       return sc;

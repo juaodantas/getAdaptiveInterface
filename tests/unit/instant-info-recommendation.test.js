@@ -102,7 +102,7 @@ describe('INSTANT route recommendation', () => {
     expect(prompt).toContain('nextStepPrediction');
     expect(prompt).toContain('infoRecommendation');
     expect(prompt).toContain('shortcuts');
-    expect(prompt).toContain('O primeiro shortcut PODE repetir o targetRoute');
+    expect(prompt).toContain('Todos os shortcuts DEVEM ter rotas diferentes');
     expect(prompt).toContain('currentActivityContext');
     expect(prompt).toContain('nextActivity');
     expect(prompt).not.toContain('CPF');
@@ -140,7 +140,7 @@ describe('INSTANT route recommendation', () => {
       ],
     });
     const normalized = normalizeInstantResponse(manyShortcuts, capabilities({ maxShortcuts: 4 }), signals, cadernoContext());
-    expect(normalized.shortcuts.length).toBe(3);
+    expect(normalized.shortcuts.length).toBe(2);
   });
 
   test('validator preserves enriched operational context contract fields', () => {
@@ -319,7 +319,7 @@ describe('INSTANT route recommendation', () => {
     expect(compact.infoCardsState).toBeUndefined();
   });
 
-  test('resolveRouteConflicts allows the first shortcut to repeat targetRoute', () => {
+  test('resolveRouteConflicts remaps first shortcut when it conflicts with targetRoute', () => {
     const resolved = resolveRouteConflicts('record_caderno_adjustment', '/cadernoCampoPage', null, [
       { route: '/cadernoCampoPage', label: 'Registrar', group: 'primary' },
       { route: '/agendaPage', label: 'Agenda', group: 'secondary' },
@@ -327,8 +327,8 @@ describe('INSTANT route recommendation', () => {
 
     expect(resolved.nextStepRoute).toBe('/cadernoCampoPage');
     const routes = [resolved.nextStepRoute, ...resolved.shortcuts.map((s) => s.route)];
-    expect(new Set(routes).size).toBe(routes.length - 1);
-    expect(resolved.shortcuts[0].route).toBe('/cadernoCampoPage');
+    expect(new Set(routes).size).toBe(routes.length);
+    expect(resolved.shortcuts[0].route).not.toBe('/cadernoCampoPage');
   });
 
   test('resolveRouteConflicts resolves info ctaRoute conflict', () => {

@@ -134,7 +134,7 @@ describe('Enhanced INSTANT mode contract', () => {
     expect(prompt).toContain('nextStepPrediction');
     expect(prompt).toContain('infoRecommendation');
     expect(prompt).toContain('shortcuts');
-    expect(prompt).toContain('O primeiro shortcut PODE repetir o targetRoute');
+    expect(prompt).toContain('Todos os shortcuts DEVEM ter rotas diferentes');
     expect(prompt).toContain('Retorne infoRecommendation válido');
     expect(prompt).not.toContain('Maria');
     expect(prompt).not.toContain('CPF 123');
@@ -222,7 +222,7 @@ describe('Enhanced INSTANT mode contract', () => {
     expect(response.uiTreatment.showProgressBar).toBe(false);
     expect(response.shortcuts.length).toBeLessThanOrEqual(3);
     const routes = [response.nextStepPrediction.targetRoute, response.infoRecommendation.ctaRoute, ...response.shortcuts.map((s) => s.route)];
-    // Opção B: first shortcut pode repetir targetRoute
+    // Todos os shortcuts DEVEM ter rotas diferentes
     const unique = [...new Set(routes)];
     expect(unique.length).toBeGreaterThanOrEqual(routes.length - 1);
   });
@@ -693,7 +693,7 @@ describe('Enhanced INSTANT mode contract', () => {
     expect(finalized.fallback.used).toBe(false);
     expect(finalized.rulesApplied).toContain('RULE-010');
     const routes = [finalized.nextStepPrediction.targetRoute, finalized.infoRecommendation.ctaRoute, ...finalized.shortcuts.map((s) => s.route)];
-    // Opção B: first shortcut pode repetir targetRoute, demais precisam ser únicos
+    // Todos os shortcuts DEVEM ter rotas diferentes
     const unique = [...new Set(routes)];
     expect(unique.length).toBeGreaterThanOrEqual(routes.length - 1);
   });
@@ -924,7 +924,7 @@ describe('Enhanced INSTANT mode contract', () => {
         ],
       );
       expect(result.shortcuts.length).toBe(2);
-      expect(result.shortcuts[0].route).toBe(result.nextStepRoute);
+      expect(result.shortcuts[0].route).not.toBe(result.nextStepRoute);
     });
   });
 });

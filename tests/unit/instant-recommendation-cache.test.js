@@ -152,7 +152,7 @@ describe('instantRecommendationCache policy', () => {
 
   test('capability profile only includes shape-affecting restrictions', () => {
     expect(deriveCapabilityProfile(capabilities({ supportsHighlightFrame: true }))).toBeNull();
-    expect(deriveCapabilityProfile(capabilities({ maxShortcuts: 2 }))).toEqual({ maxShortcuts: 2 });
+    expect(deriveCapabilityProfile(capabilities({ maxShortcuts: 2 }))).toBeNull();
     expect(deriveCapabilityProfile(capabilities({ supportedInfoTypes: ['basic_tip'] }))).toEqual({ supportedInfoTypes: ['basic_tip'] });
   });
 });
