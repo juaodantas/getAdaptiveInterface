@@ -127,7 +127,7 @@ const DEFAULT_SUPPORTED_COMPONENTS = [
 const SHORTCUT_GROUPS = ['primary', 'secondary', 'contextual'];
 
 const SAFE_LIMITS = {
-  maxShortcuts: 3,
+  maxShortcuts: 2,
   maxSectionAdaptations: 4,
 };
 
