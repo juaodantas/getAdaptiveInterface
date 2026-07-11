@@ -551,6 +551,26 @@ function sanitizeFinalInstantResponse(response, clientCapabilities) {
   return sanitized;
 }
 
+/**
+ * Opção E: Garante que a rota primária (targetRoute) esteja presente
+ * como primeiro shortcut. Se Gemini omitiu, insere a partir do nextStepPrediction.
+ */
+function ensurePrimaryShortcut(shortcuts, primaryRoute, nextStepData, maxShortcuts) {
+  if (!primaryRoute) return shortcuts;
+  if (shortcuts.some((s) => s && s.route === primaryRoute)) return shortcuts;
+
+  const primary = {
+    route: primaryRoute,
+    confidence: 1.0,
+    label: (nextStepData && nextStepData.actionLabel) || 'Abrir',
+    description: (nextStepData && nextStepData.description) || '',
+    group: 'primary',
+    reason: (nextStepData && nextStepData.description) || '',
+  };
+
+  return [primary, ...shortcuts].slice(0, Math.max(1, maxShortcuts || 3));
+}
+
 function finalizeValidInstantResponse(response, clientCapabilities, signals) {
   const capabilities = clientCapabilities || {};
   const stepId = signals?.stepId || response.nextStepPrediction?.stepId || '';
@@ -591,13 +611,21 @@ function finalizeValidInstantResponse(response, clientCapabilities, signals) {
     resolved.shortcuts,
   );
 
+  // Opção E: garantir que o shortcut primário (targetRoute) exista como shortcuts[0]
+  const finalShortcuts = ensurePrimaryShortcut(
+    resolvedShortcuts,
+    resolved.nextStepRoute,
+    response.nextStepPrediction,
+    maxShortcuts,
+  );
+
   return {
     ...response,
     nextStepPrediction: {
       ...response.nextStepPrediction,
       targetRoute: resolved.nextStepRoute,
     },
-    shortcuts: resolvedShortcuts,
+    shortcuts: finalShortcuts,
     mode: ADAPTIVE_MODES.INSTANT,
     source: ADAPTIVE_SOURCES.ADAPTIVE,
     visualPriority: VISUAL_PRIORITIES.MODERATE,
@@ -619,5 +647,6 @@ module.exports = {
   validateInfoRecommendation,
   finalizeValidInstantResponse,
   sanitizeFinalInstantResponse,
+  ensurePrimaryShortcut,
   FINAL_INSTANT_RESPONSE_KEYS,
 };

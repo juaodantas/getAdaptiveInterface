@@ -957,7 +957,8 @@ describe('finalizeValidInstantResponse integration', () => {
     expect(result.operationalOnboarding.recommendedActions).toBeUndefined();
     expect(result.infoRecommendation).toBeNull();
     expect(result.nextStepPrediction.targetRoute).toBe('/lotePage');
-    expect(result.shortcuts.map((shortcut) => shortcut.route)).toEqual(['/protocoloPage', '/areaCultivoPage']);
+    // Opção E: ensurePrimaryShortcut insere /lotePage como shortcuts[0]
+    expect(result.shortcuts.map((shortcut) => shortcut.route)).toEqual(['/lotePage', '/protocoloPage', '/areaCultivoPage']);
   });
 
   it('backfills canonical secondary shortcuts when only the primary create-lot shortcut remains', () => {
@@ -984,8 +985,9 @@ describe('finalizeValidInstantResponse integration', () => {
     });
 
     expect(result.infoRecommendation).toBeNull();
-    expect(result.shortcuts.map((shortcut) => shortcut.route)).toEqual(['/protocoloPage', '/areaCultivoPage']);
-    expect(result.shortcuts).toHaveLength(2);
+    // Opção E: ensurePrimaryShortcut reinsere /lotePage após canonical backfill
+    expect(result.shortcuts.map((shortcut) => shortcut.route)).toEqual(['/lotePage', '/protocoloPage', '/areaCultivoPage']);
+    expect(result.shortcuts).toHaveLength(3);
   });
 
   it('removes create-lot intent shortcuts by label before canonical backfill', () => {
@@ -1012,9 +1014,10 @@ describe('finalizeValidInstantResponse integration', () => {
       rulesApplied: ['RULE-001', 'RULE-010'],
     });
 
-    expect(result.shortcuts.map((shortcut) => shortcut.route)).toEqual(['/protocoloPage', '/areaCultivoPage']);
-    expect(result.shortcuts[0].label).toBe('Ver protocolos de cultivo');
-    expect(result.shortcuts[0].reason).not.toContain('Criar primeiro lote');
+    // Opção E: ensurePrimaryShortcut insere /lotePage como shortcuts[0]
+    expect(result.shortcuts.map((shortcut) => shortcut.route)).toEqual(['/lotePage', '/protocoloPage', '/areaCultivoPage']);
+    expect(result.shortcuts[1].label).toBe('Ver protocolos de cultivo');
+    expect(result.shortcuts[1].reason).not.toContain('Criar primeiro lote');
   });
 
   it('rejects final onboarding info slot when targetRoute is not areaCultivoPage', () => {

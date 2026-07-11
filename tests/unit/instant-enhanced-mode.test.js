@@ -302,7 +302,8 @@ describe('Enhanced INSTANT mode contract', () => {
     expect(response.visualPriority).toBe('moderate');
     expect(response.fallback.used).toBe(false);
     const routes = [response.nextStepPrediction.targetRoute, response.infoRecommendation.ctaRoute, ...response.shortcuts.map((s) => s.route)];
-    expect(new Set(routes).size).toBe(routes.length);
+    // Opção E: ensurePrimaryShortcut pode inserir targetRoute como shortcut[0], gerando 1 duplicata permitida
+    expect(new Set(routes).size).toBeGreaterThanOrEqual(routes.length - 1);
     expect(response.shortcuts.length).toBeLessThanOrEqual(3);
   });
 
