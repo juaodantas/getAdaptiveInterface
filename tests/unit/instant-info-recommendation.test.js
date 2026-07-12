@@ -140,7 +140,7 @@ describe('INSTANT route recommendation', () => {
       ],
     });
     const normalized = normalizeInstantResponse(manyShortcuts, capabilities({ maxShortcuts: 4 }), signals, cadernoContext());
-    expect(normalized.shortcuts.length).toBe(2);
+    expect(normalized.shortcuts.length).toBe(3);
   });
 
   test('validator preserves enriched operational context contract fields', () => {

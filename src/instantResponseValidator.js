@@ -21,6 +21,7 @@ const {
 } = require('./instantInfoRecommendationBuilder');
 const {
   buildOperationalOnboardingFallback,
+  stepUsesOperationalOnboardingInfoSlot,
   validateOperationalOnboarding,
 } = require('./instantOperationalOnboardingBuilder');
 const {
@@ -223,7 +224,7 @@ function validateInstantResponse(response, clientCapabilities) {
   if ((response.uiTreatment?.showProgressBar ?? false) !== false) {
     errors.push('progress_bar_requested');
   }
-  if (hasCreateLotOperationalOnboarding(response)) {
+  if (hasSlotOperationalOnboarding(response)) {
     if (!hasValidOnboardingInfoSlotContract(response)) {
       errors.push('invalid_onboarding_info_slot_contract');
     }
@@ -381,14 +382,15 @@ function sanitizeFinalInfoRecommendation(value) {
 }
 
 function hasOperationalOnboardingInfoSlot(response) {
-  return response.nextStepPrediction?.stepId === 'create_lot_with_protocol'
+  const stepId = response.nextStepPrediction?.stepId;
+  return stepUsesOperationalOnboardingInfoSlot(stepId)
     && isPlainObject(response.operationalOnboarding)
     && validateOperationalOnboarding(response.operationalOnboarding).length === 0
-    && hasOnboardingInfoSlotTarget(response.operationalOnboarding);
+    && hasOnboardingInfoSlotTarget(response.operationalOnboarding, stepId);
 }
 
-function hasCreateLotOperationalOnboarding(response) {
-  return response.nextStepPrediction?.stepId === 'create_lot_with_protocol'
+function hasSlotOperationalOnboarding(response) {
+  return stepUsesOperationalOnboardingInfoSlot(response.nextStepPrediction?.stepId)
     && response.operationalOnboarding !== null
     && response.operationalOnboarding !== undefined;
 }
@@ -396,7 +398,7 @@ function hasCreateLotOperationalOnboarding(response) {
 function hasValidOnboardingInfoSlotContract(response) {
   return isPlainObject(response.operationalOnboarding)
     && validateOperationalOnboarding(response.operationalOnboarding).length === 0
-    && hasOnboardingInfoSlotTarget(response.operationalOnboarding)
+    && hasOnboardingInfoSlotTarget(response.operationalOnboarding, response.nextStepPrediction?.stepId)
     && response.infoRecommendation === null;
 }
 
@@ -528,7 +530,7 @@ function hasValidFinalNestedContract(response, clientCapabilities) {
     }
   }
 
-  if (hasCreateLotOperationalOnboarding(response)) {
+  if (hasSlotOperationalOnboarding(response)) {
     return hasValidOnboardingInfoSlotContract(response);
   }
 
@@ -575,10 +577,10 @@ function finalizeValidInstantResponse(response, clientCapabilities, signals) {
   const capabilities = clientCapabilities || {};
   const stepId = signals?.stepId || response.nextStepPrediction?.stepId || '';
   const operationalOnboarding = response.operationalOnboarding || null;
-  const onboardingOwnsInfoSlot = stepId === 'create_lot_with_protocol'
+  const onboardingOwnsInfoSlot = stepUsesOperationalOnboardingInfoSlot(stepId)
     && operationalOnboarding
     && validateOperationalOnboarding(operationalOnboarding).length === 0
-    && hasOnboardingInfoSlotTarget(operationalOnboarding);
+    && hasOnboardingInfoSlotTarget(operationalOnboarding, stepId);
   let infoRecommendation = null;
 
   if (!onboardingOwnsInfoSlot) {

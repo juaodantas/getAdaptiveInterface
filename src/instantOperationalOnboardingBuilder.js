@@ -1,35 +1,57 @@
 const { ALLOWED_INSTANT_ROUTES } = require('./adaptiveContract');
-const { DOMAIN_RULES } = require('./instantDomainRules');
+const { DOMAIN_RULES, RULE_IDS } = require('./instantDomainRules');
 
-const STEP_IDS_WITH_ONBOARDING = ['create_lot_with_protocol'];
+const STEP_IDS_WITH_ONBOARDING = ['create_lot_with_protocol', 'plan_next_lot'];
 
-const OPERATIONAL_ONBOARDING_FALLBACK = {
-  title: 'Como começar',
-  message: 'Crie seu primeiro lote com protocolo para iniciar o acompanhamento.',
-  steps: [
-    'Cadastre ou selecione um protocolo',
-    'Crie o primeiro lote',
-    'Acompanhe as atividades geradas na agenda',
-  ],
-  ctaLabel: 'Criar primeiro lote',
-  priority: 20,
+const OPERATIONAL_ONBOARDING_FALLBACKS = {
+  create_lot_with_protocol: {
+    title: 'Como começar',
+    message: 'Crie seu primeiro lote com protocolo para iniciar o acompanhamento.',
+    steps: [
+      'Cadastre ou selecione um protocolo',
+      'Crie o primeiro lote',
+      'Acompanhe as atividades geradas na agenda',
+    ],
+    ctaLabel: 'Criar primeiro lote',
+    priority: 20,
+  },
+  plan_next_lot: {
+    title: 'Planejar próximo lote',
+    message: 'Seu lote ativo está em acompanhamento. Planeje o próximo lote para manter a produção organizada.',
+    steps: [
+      'Revise a capacidade disponível',
+      'Crie o próximo lote',
+      'Vincule um protocolo antes de iniciar',
+    ],
+    ctaLabel: 'Planejar próximo lote',
+    priority: 20,
+  },
 };
 
+const OPERATIONAL_ONBOARDING_FALLBACK = OPERATIONAL_ONBOARDING_FALLBACKS.create_lot_with_protocol;
+
 function resolveOperationalOnboardingTargetRoute(signals) {
-  return signals?.stepId === 'create_lot_with_protocol'
-    ? '/areaCultivoPage'
-    : signals?.targetRoute || '/protocoloPage';
+  if (signals?.stepId === 'create_lot_with_protocol') return '/areaCultivoPage';
+  if (signals?.stepId === 'plan_next_lot') return '/lotePage';
+  return signals?.targetRoute || '/protocoloPage';
 }
 
 function resolveReason(signals) {
   const rulesApplied = Array.isArray(signals && signals.rulesApplied) ? signals.rulesApplied : [];
   for (const ruleId of rulesApplied) {
+    if (ruleId === RULE_IDS.NO_PROGRESS_BAR) {
+      continue;
+    }
     const rule = DOMAIN_RULES.find((r) => r.id === ruleId);
     if (rule) {
       return rule.description;
     }
   }
   return 'Usuário ainda não possui lote ativo com protocolo.';
+}
+
+function stepUsesOperationalOnboardingInfoSlot(stepId) {
+  return STEP_IDS_WITH_ONBOARDING.includes(stepId);
 }
 
 function validateOperationalOnboarding(value) {
@@ -76,9 +98,10 @@ function buildOperationalOnboardingFallback({ signals } = {}) {
   if (!signals || !STEP_IDS_WITH_ONBOARDING.includes(signals.stepId)) {
     return null;
   }
+  const fallback = OPERATIONAL_ONBOARDING_FALLBACKS[signals.stepId] || OPERATIONAL_ONBOARDING_FALLBACK;
 
   return {
-    ...OPERATIONAL_ONBOARDING_FALLBACK,
+    ...fallback,
     targetRoute: resolveOperationalOnboardingTargetRoute(signals),
     reason: resolveReason(signals),
   };
@@ -116,6 +139,8 @@ module.exports = {
   normalizeOperationalOnboarding,
   validateOperationalOnboarding,
   buildOperationalOnboardingFallback,
+  stepUsesOperationalOnboardingInfoSlot,
   STEP_IDS_WITH_ONBOARDING,
   OPERATIONAL_ONBOARDING_FALLBACK,
+  OPERATIONAL_ONBOARDING_FALLBACKS,
 };

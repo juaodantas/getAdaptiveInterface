@@ -19,6 +19,11 @@ const STEP_COPY = {
     description: 'Crie o primeiro lote com protocolo para iniciar o acompanhamento.',
     actionLabel: 'Criar primeiro lote',
   },
+  plan_next_lot: {
+    title: 'Planejar próximo lote',
+    description: 'Seu lote ativo está em acompanhamento. Planeje o próximo lote para manter a produção organizada.',
+    actionLabel: 'Planejar próximo lote',
+  },
   check_generated_activities: {
     title: 'Confira a Agenda antes de seguir.',
     description: 'O lote com protocolo já foi criado. Confira as atividades geradas para o primeiro dia.',
@@ -85,12 +90,17 @@ function usesOperationalOnboardingInfoSlot(stepId, operationalOnboarding) {
   return shouldUseOnboardingInfoSlot(stepId, operationalOnboarding);
 }
 
+function supportsOperationalOnboarding(clientCapabilities) {
+  return clientCapabilities?.supportedComponents?.includes('OperationalOnboardingCard') === true;
+}
+
 function buildEnhancedInstantFallback({ operationalContext, clientCapabilities, reason = 'deterministic_fallback' }) {
-  const signals = deriveInstantSignals(operationalContext);
+  const supportsOnboarding = supportsOperationalOnboarding(clientCapabilities);
+  const signals = deriveInstantSignals(operationalContext, { supportsOperationalOnboarding: supportsOnboarding });
   const dashboard = DASHBOARD_CONFIG[signals.dashboardId] || DASHBOARD_CONFIG.TAREFAS_PENDENTES;
   const copy = STEP_COPY[signals.stepId] || STEP_COPY.create_lot_with_protocol;
   const confidence = reason === 'gemini_invalid_response' ? 0.68 : 0.64;
-  const operationalOnboarding = clientCapabilities?.supportedComponents?.includes('OperationalOnboardingCard')
+  const operationalOnboarding = supportsOnboarding
     ? buildOperationalOnboardingFallback({ signals })
     : null;
   const onboardingOwnsInfoSlot = usesOperationalOnboardingInfoSlot(signals.stepId, operationalOnboarding);

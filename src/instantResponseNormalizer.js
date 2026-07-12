@@ -1,6 +1,6 @@
 const { DASHBOARD_CONFIG, SHORTCUT_GROUPS } = require('./adaptiveContract');
 const { normalizeInfoWithSignal } = require('./instantInfoRecommendationBuilder');
-const { normalizeOperationalOnboarding } = require('./instantOperationalOnboardingBuilder');
+const { normalizeOperationalOnboarding, stepUsesOperationalOnboardingInfoSlot } = require('./instantOperationalOnboardingBuilder');
 
 function clampConfidence(value, fallback = 0.6) {
   const parsed = Number(value);
@@ -87,7 +87,7 @@ function normalizeInstantResponse(raw, clientCapabilities, signals, operationalC
     signals || { rulesApplied: raw && raw.rulesApplied },
     clientCapabilities,
   );
-  const infoRecommendation = signals?.stepId === 'create_lot_with_protocol' && operationalOnboarding
+  const infoRecommendation = stepUsesOperationalOnboardingInfoSlot(signals?.stepId) && operationalOnboarding
     ? null
     : raw.infoRecommendation
       ? normalizeInfoWithSignal(raw.infoRecommendation, clientCapabilities, signals || { rulesApplied: raw.rulesApplied }, operationalContext)

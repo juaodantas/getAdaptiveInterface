@@ -1,7 +1,12 @@
 const { STEP_SHORTCUTS } = require('./instantDomainRules');
 
+const ONBOARDING_INFO_SLOT_STEP_IDS = ['create_lot_with_protocol', 'plan_next_lot'];
 const ONBOARDING_INFO_SLOT_STEP_ID = 'create_lot_with_protocol';
 const ONBOARDING_INFO_SLOT_TARGET_ROUTE = '/areaCultivoPage';
+const ONBOARDING_INFO_SLOT_TARGET_ROUTES = {
+  create_lot_with_protocol: '/areaCultivoPage',
+  plan_next_lot: '/lotePage',
+};
 const CREATE_LOT_ROUTE = '/lotePage';
 const CANONICAL_SECONDARY_ROUTES = ['/protocoloPage', '/areaCultivoPage'];
 
@@ -36,12 +41,12 @@ function duplicatesPrimaryCreateLotIntent(shortcut) {
   return shortcut?.route === CREATE_LOT_ROUTE || hasCreateLotIntentText(shortcut || {});
 }
 
-function hasOnboardingInfoSlotTarget(operationalOnboarding) {
-  return operationalOnboarding?.targetRoute === ONBOARDING_INFO_SLOT_TARGET_ROUTE;
+function hasOnboardingInfoSlotTarget(operationalOnboarding, stepId = ONBOARDING_INFO_SLOT_STEP_ID) {
+  return operationalOnboarding?.targetRoute === ONBOARDING_INFO_SLOT_TARGET_ROUTES[stepId];
 }
 
 function shouldUseOnboardingInfoSlot(stepId, operationalOnboarding) {
-  return stepId === ONBOARDING_INFO_SLOT_STEP_ID && hasOnboardingInfoSlotTarget(operationalOnboarding);
+  return ONBOARDING_INFO_SLOT_STEP_IDS.includes(stepId) && hasOnboardingInfoSlotTarget(operationalOnboarding, stepId);
 }
 
 function canonicalShortcutForRoute(route, existingShortcut, index) {
@@ -60,7 +65,7 @@ function canonicalShortcutForRoute(route, existingShortcut, index) {
 }
 
 function canonicalizeOnboardingSecondaryShortcuts(stepId, operationalOnboarding, shortcuts) {
-  if (!shouldUseOnboardingInfoSlot(stepId, operationalOnboarding)) {
+  if (!shouldUseOnboardingInfoSlot(stepId, operationalOnboarding) || stepId !== 'create_lot_with_protocol') {
     return shortcuts;
   }
 
@@ -77,7 +82,9 @@ function canonicalizeOnboardingSecondaryShortcuts(stepId, operationalOnboarding,
 
 module.exports = {
   ONBOARDING_INFO_SLOT_STEP_ID,
+  ONBOARDING_INFO_SLOT_STEP_IDS,
   ONBOARDING_INFO_SLOT_TARGET_ROUTE,
+  ONBOARDING_INFO_SLOT_TARGET_ROUTES,
   canonicalizeOnboardingSecondaryShortcuts,
   hasOnboardingInfoSlotTarget,
   shouldUseOnboardingInfoSlot,

@@ -7,6 +7,10 @@ const {
   sanitizeShortcutRouteResource,
   validateShortcuts,
 } = require('../../index.js');
+const { deriveInstantSignals } = require('../../src/instantDomainRules');
+const { buildEnhancedInstantFallback } = require('../../src/instantFallbackBuilder');
+const { normalizeClientCapabilities } = require('../../src/clientCapabilitiesValidator');
+const { normalizeOperationalContext } = require('../../src/operationalContextValidator');
 
 describe('Instant mode recommendation fixes', () => {
   describe('normalizeInstantNavigation', () => {
@@ -164,6 +168,89 @@ describe('Instant mode recommendation fixes', () => {
           resourceName: null,
         },
       ]);
+    });
+  });
+
+  describe('plan_next_lot priority', () => {
+    function continuityContext(overrides = {}) {
+      return normalizeOperationalContext({
+        dashboardState: { hasActiveLots: true, activeLotsCount: 1, hasProtocolLinkedToLatestLot: true },
+        agendaState: { hasGeneratedActivities: false, pendingActivitiesTodayCount: 0, overdueActivitiesCount: 0 },
+        alertState: { hasCriticalAlerts: false, criticalCount: 0 },
+        fieldNotebookState: { hasRecentNotes: false, hasNutritionAdjustmentRecord: false },
+        productionState: { hasProductionData: false },
+        cultivationState: { culturesCount: 0, speciesInProgressCount: 0 },
+        reservoirState: { hasReservoirs: false },
+        teamState: { activeMembers: 0, onTimeActivities: 0, overdueActivities: 0 },
+        ...overrides,
+      });
+    }
+
+    test('returns plan_next_lot for active lot with protocol and no urgencies', () => {
+      const result = deriveInstantSignals(continuityContext());
+
+      expect(result.stepId).toBe('plan_next_lot');
+      expect(result.targetRoute).toBe('/lotePage');
+      expect(result.rulesApplied).toContain('RULE-016');
+    });
+
+    test('fallback does not return plan_next_lot when client lacks OperationalOnboardingCard', () => {
+      const response = buildEnhancedInstantFallback({
+        operationalContext: continuityContext(),
+        clientCapabilities: normalizeClientCapabilities({
+          supportedComponents: ['NextStepCard', 'AdaptiveFocusBanner'],
+          maxShortcuts: 3,
+          maxSectionAdaptations: 4,
+        }),
+        reason: 'test',
+      });
+
+      expect(response.nextStepPrediction.stepId).toBe('check_generated_activities');
+      expect(response.nextStepPrediction.stepId).not.toBe('plan_next_lot');
+      expect(response.nextStepPrediction.targetRoute).toBe('/agendaPage');
+      expect(response.operationalOnboarding).toBeNull();
+      expect(response.rulesApplied).not.toContain('RULE-016');
+    });
+
+    test('critical alerts take priority over plan_next_lot', () => {
+      const result = deriveInstantSignals(continuityContext({
+        alertState: { hasCriticalAlerts: true, criticalCount: 1 },
+      }));
+
+      expect(result.stepId).toBe('review_critical_alerts');
+    });
+
+    test('overdue tasks take priority over plan_next_lot', () => {
+      const result = deriveInstantSignals(continuityContext({
+        agendaState: { hasGeneratedActivities: false, overdueActivitiesCount: 1 },
+      }));
+
+      expect(result.stepId).toBe('resolve_overdue_tasks');
+    });
+
+    test('today tasks take priority over plan_next_lot', () => {
+      const result = deriveInstantSignals(continuityContext({
+        agendaState: { hasGeneratedActivities: false, pendingActivitiesTodayCount: 1 },
+      }));
+
+      expect(result.stepId).toBe('review_today_tasks');
+    });
+
+    test.each([
+      ['future due label', { nextActivityStatus: 'pending', nextActivityDueLabel: 'tomorrow' }],
+      ['missing due label', { nextActivityStatus: 'pending' }],
+    ])('does not block plan_next_lot for pending next activity with %s', (_, agendaState) => {
+      const result = deriveInstantSignals(continuityContext({
+        agendaState: {
+          hasGeneratedActivities: false,
+          pendingActivitiesTodayCount: 0,
+          overdueActivitiesCount: 0,
+          ...agendaState,
+        },
+      }));
+
+      expect(result.stepId).toBe('plan_next_lot');
+      expect(result.rulesApplied).toContain('RULE-016');
     });
   });
 });

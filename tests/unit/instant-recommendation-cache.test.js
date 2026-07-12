@@ -112,6 +112,24 @@ describe('instantRecommendationCache policy', () => {
     expect(legacyTestSignalsOnly.cacheKey).toBe(base.cacheKey);
   });
 
+  test('uses distinct cache keys for initial onboarding and continuity onboarding stepIds', () => {
+    const initial = lookupFor(context({
+      dashboardState: { hasActiveLots: false, activeLotsCount: 0, hasProtocolLinkedToLatestLot: false },
+      agendaState: { hasGeneratedActivities: false, pendingActivitiesTodayCount: 0, overdueActivitiesCount: 0 },
+      testSequenceSignals: {},
+    }));
+    const continuity = lookupFor(context({
+      dashboardState: { hasActiveLots: true, activeLotsCount: 1, hasProtocolLinkedToLatestLot: true },
+      agendaState: { hasGeneratedActivities: false, pendingActivitiesTodayCount: 0, overdueActivitiesCount: 0 },
+      testSequenceSignals: {},
+    }));
+
+    expect(initial.stepId).toBe('create_lot_with_protocol');
+    expect(continuity.stepId).toBe('plan_next_lot');
+    expect(continuity.cacheKey).not.toBe(initial.cacheKey);
+    expect(continuity.cacheKeyCanonical.stepId).toBe('plan_next_lot');
+  });
+
   test('canonical excludes exact timestamps, ids, raw routes and free text', () => {
     const lookup = lookupFor(context({
       generatedAt: '2026-07-10T10:11:12Z',
@@ -152,7 +170,7 @@ describe('instantRecommendationCache policy', () => {
 
   test('capability profile only includes shape-affecting restrictions', () => {
     expect(deriveCapabilityProfile(capabilities({ supportsHighlightFrame: true }))).toBeNull();
-    expect(deriveCapabilityProfile(capabilities({ maxShortcuts: 2 }))).toBeNull();
+    expect(deriveCapabilityProfile(capabilities({ maxShortcuts: 2 }))).toEqual({ maxShortcuts: 2 });
     expect(deriveCapabilityProfile(capabilities({ supportedInfoTypes: ['basic_tip'] }))).toEqual({ supportedInfoTypes: ['basic_tip'] });
   });
 });

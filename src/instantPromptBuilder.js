@@ -9,6 +9,7 @@ const {
   INFO_RECOMMENDATION_CATEGORIES,
 } = require('./adaptiveContract');
 const { DOMAIN_RULES } = require('./instantDomainRules');
+const { stepUsesOperationalOnboardingInfoSlot } = require('./instantOperationalOnboardingBuilder');
 
 const PROMPT_ALERT_TYPES = ['critical', 'operational', 'agenda', 'production', 'protocol', 'nutrition'];
 const PROMPT_SEVERITIES = ['low', 'medium', 'high', 'critical'];
@@ -107,10 +108,10 @@ function buildInstantPrompt({ navigationContext, sessionNavigations, operational
 
   const agendaState = operationalContext.agendaState || {};
   const maxShortcuts = Math.max(1, clientCapabilities.maxShortcuts || 3);
-  const shouldNullInfoRecommendation = signals.stepId === 'create_lot_with_protocol'
+  const shouldNullInfoRecommendation = stepUsesOperationalOnboardingInfoSlot(signals.stepId)
     && clientCapabilities.supportedComponents.includes('OperationalOnboardingCard');
   const onboardingInfoRecommendationRule = shouldNullInfoRecommendation
-    ? '- Se stepContext.stepId === "create_lot_with_protocol" e OperationalOnboardingCard estiver suportado, retorne infoRecommendation: null porque operationalOnboarding ocupa o slot do card informativo.'
+    ? '- Se stepContext.stepId === "create_lot_with_protocol" e OperationalOnboardingCard estiver suportado, ou stepContext.stepId === "plan_next_lot" e OperationalOnboardingCard estiver suportado, retorne infoRecommendation: null porque operationalOnboarding ocupa o slot do card informativo.'
     : '- Retorne infoRecommendation válido conforme o schema obrigatório.';
 
   const promptPayload = {

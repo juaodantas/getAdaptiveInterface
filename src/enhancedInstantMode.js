@@ -35,6 +35,10 @@ function sanitizeCachedRecommendation(recommendation, clientCapabilities) {
   return sanitizeFinalInstantResponse(recommendation, clientCapabilities);
 }
 
+function supportsOperationalOnboarding(clientCapabilities) {
+  return clientCapabilities.supportedComponents.includes('OperationalOnboardingCard');
+}
+
 async function readInstantCache({ instantRecommendationCache, lookup, clientCapabilities, cacheEventReporter }) {
   if (!instantRecommendationCache || !lookup.cacheable) {
     emitCacheEvent(cacheEventReporter, 'instant_cache_bypass', lookup, lookup.reason);
@@ -161,7 +165,9 @@ async function buildEnhancedInstantRecommendation({
   const clientCapabilities = normalizeClientCapabilities(data.clientCapabilities);
   const navigationContext = normalizeNavigationContext(data, sessionNavigations);
   const sanitizedSessionNavigations = sanitizeSessionNavigations(sessionNavigations);
-  const signals = deriveInstantSignals(operationalContext);
+  const signals = deriveInstantSignals(operationalContext, {
+    supportsOperationalOnboarding: supportsOperationalOnboarding(clientCapabilities),
+  });
   const fallbackInput = { operationalContext, clientCapabilities };
 
   const cacheLookup = buildCacheLookup({ operationalContext, signals, clientCapabilities, navigationContext });

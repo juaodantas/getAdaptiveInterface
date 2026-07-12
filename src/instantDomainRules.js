@@ -13,6 +13,7 @@ const RULE_IDS = {
   RESERVOIR_ATTENTION: 'RULE-013',
   PRODUCTION_CONTEXT: 'RULE-014',
   TEAM_CONTEXT: 'RULE-015',
+  PLAN_NEXT_LOT: 'RULE-016',
 };
 
 const DOMAIN_RULES = [
@@ -30,6 +31,7 @@ const DOMAIN_RULES = [
   { id: RULE_IDS.RESERVOIR_ATTENTION, description: 'Há sinais de reservatório ou solução nutritiva: recomendar reservatórios/solução.' },
   { id: RULE_IDS.PRODUCTION_CONTEXT, description: 'Há dados de produção ou cultivo: recomendar resumo operacional.' },
   { id: RULE_IDS.TEAM_CONTEXT, description: 'Há sinais de equipe: recomendar saúde da equipe.' },
+  { id: RULE_IDS.PLAN_NEXT_LOT, description: 'Há lote ativo com protocolo e nenhuma urgência operacional no momento.' },
 ];
 
 const ROUTE_CONFLICT_RESOLVER = {
@@ -37,6 +39,11 @@ const ROUTE_CONFLICT_RESOLVER = {
     '/lotePage': '/protocoloPage',
     '/protocoloPage': '/areaCultivoPage',
     '/areaCultivoPage': '/protocoloPage',
+  },
+  plan_next_lot: {
+    '/lotePage': '/protocoloPage',
+    '/protocoloPage': '/areaCultivoPage',
+    '/areaCultivoPage': '/relatoriosPage',
   },
   check_generated_activities: {
     '/agendaPage': '/lotePage',
@@ -81,6 +88,11 @@ const STEP_SHORTCUTS = {
     { route: '/lotePage', label: 'Criar primeiro lote', description: 'Comece vinculando um protocolo ao lote', group: 'primary' },
     { route: '/protocoloPage', label: 'Ver protocolos de cultivo', description: 'Consulte os protocolos de cultivo disponíveis', group: 'secondary' },
     { route: '/areaCultivoPage', label: 'Configurar estrutura', description: 'Configure a estrutura de áreas de cultivo', group: 'contextual' },
+  ],
+  plan_next_lot: [
+    { route: '/lotePage', label: 'Planejar próximo lote', description: 'Prepare a criação do próximo lote', group: 'primary' },
+    { route: '/protocoloPage', label: 'Ver protocolos', description: 'Revise protocolos disponíveis antes de iniciar', group: 'secondary' },
+    { route: '/areaCultivoPage', label: 'Revisar estrutura', description: 'Confira a capacidade disponível para o próximo lote', group: 'contextual' },
   ],
   check_generated_activities: [
     { route: '/agendaPage', label: 'Ver Agenda', description: 'Confira as atividades geradas para o primeiro dia', group: 'primary' },
@@ -138,7 +150,7 @@ function hasRecentUserAction(actions, entityTypes, actionTypes) {
   return actions.some((item) => entityTypes.includes(item.entityType) && actionTypes.includes(item.action));
 }
 
-function deriveInstantSignals(context) {
+function deriveInstantSignals(context, options = {}) {
   const dashboard = context.dashboardState;
   const agenda = context.agendaState;
   const notebook = context.fieldNotebookState;
@@ -160,8 +172,7 @@ function deriveInstantSignals(context) {
   };
 
   const hasTodayTasks = agenda.pendingToday > 0
-    || agenda.nextActivityDueLabel === 'today'
-    || agenda.nextActivityStatus === 'pending';
+    || agenda.nextActivityDueLabel === 'today';
   const hasProtocolTask = agenda.hasGeneratedActivities
     || agenda.hasProtocolTasks
     || agenda.nextActivityType === 'protocol_activity';
@@ -184,6 +195,11 @@ function deriveInstantSignals(context) {
     || cultivation.speciesInProgressCount > 0
     || dashboard.hasUpcomingHarvests;
   const hasTeamSignal = team.activeMembers > 0 || team.overdueActivities > 0 || team.onTimeActivities > 0;
+  const hasActiveLot = dashboard.hasActiveLots || dashboard.activeLotsCount > 0;
+  const hasContinuityContext = hasActiveLot
+    && dashboard.hasProtocolLinkedToLatestLot
+    && !hasTodayTasks
+    && !hasProtocolTask;
   const hasRecentLotCreated = hasRecentUserAction(recentUserActions, ['lot'], ['created']);
   const hasRecentAgendaChecked = hasRecentUserAction(recentUserActions, ['agenda', 'agenda_activity'], ['viewed', 'opened', 'edited']);
   const hasRecentFieldRecord = hasRecentUserAction(recentUserActions, ['field_note', 'nutrition_adjustment'], ['created']);
@@ -243,6 +259,11 @@ function deriveInstantSignals(context) {
   if (hasTodayTasks) {
     rulesApplied.push(RULE_IDS.TODAY_TASKS);
     return { stepId: 'review_today_tasks', targetRoute: '/agendaPage', dashboardId: 'TAREFAS_PENDENTES', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.review_today_tasks, 0.8) };
+  }
+
+  if (hasContinuityContext && options.supportsOperationalOnboarding !== false) {
+    rulesApplied.push(RULE_IDS.PLAN_NEXT_LOT);
+    return { stepId: 'plan_next_lot', targetRoute: '/lotePage', dashboardId: 'LOTE_PRODUCAO', focusMessage: 'Planejar próximo lote', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.plan_next_lot, 0.75) };
   }
 
   // Priority 4: Protocol tasks or recent protocol lot

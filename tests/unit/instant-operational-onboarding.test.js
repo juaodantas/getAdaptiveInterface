@@ -5,7 +5,10 @@ const {
   STEP_IDS_WITH_ONBOARDING,
   OPERATIONAL_ONBOARDING_FALLBACK,
 } = require('../../src/instantOperationalOnboardingBuilder');
+const { deriveInstantSignals } = require('../../src/instantDomainRules');
+const { buildEnhancedInstantFallback } = require('../../src/instantFallbackBuilder');
 const { normalizeClientCapabilities } = require('../../src/clientCapabilitiesValidator');
+const { normalizeOperationalContext } = require('../../src/operationalContextValidator');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -56,6 +59,15 @@ function otherSignals(overrides = {}) {
   };
 }
 
+function continuitySignals(overrides = {}) {
+  return {
+    stepId: 'plan_next_lot',
+    targetRoute: '/lotePage',
+    rulesApplied: ['RULE-016', 'RULE-010'],
+    ...overrides,
+  };
+}
+
 function completeSignals(overrides = {}) {
   return {
     stepId: 'test_complete',
@@ -95,13 +107,27 @@ function validValidationShape(overrides = {}) {
   };
 }
 
+function continuityContext(overrides = {}) {
+  return normalizeOperationalContext({
+    dashboardState: { hasActiveLots: true, activeLotsCount: 1, hasProtocolLinkedToLatestLot: true },
+    agendaState: { hasGeneratedActivities: false, pendingActivitiesTodayCount: 0, overdueActivitiesCount: 0 },
+    alertState: { hasCriticalAlerts: false, criticalCount: 0 },
+    fieldNotebookState: { hasRecentNotes: false, hasNutritionAdjustmentRecord: false },
+    productionState: { hasProductionData: false },
+    cultivationState: { culturesCount: 0, speciesInProgressCount: 0 },
+    reservoirState: { hasReservoirs: false },
+    teamState: { activeMembers: 0, onTimeActivities: 0, overdueActivities: 0 },
+    ...overrides,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 describe('STEP_IDS_WITH_ONBOARDING constant', () => {
-  test('contains only create_lot_with_protocol', () => {
-    expect(STEP_IDS_WITH_ONBOARDING).toEqual(['create_lot_with_protocol']);
+  test('contains supported onboarding steps', () => {
+    expect(STEP_IDS_WITH_ONBOARDING).toEqual(['create_lot_with_protocol', 'plan_next_lot']);
   });
 
   test('const variable cannot be reassigned', () => {
@@ -161,6 +187,56 @@ describe('Scenario 1: create_lot_with_protocol with OperationalOnboardingCard ca
     expect(result).not.toBeNull();
     expect(result.title).toBe('Como começar');
     expect(result.targetRoute).toBe('/areaCultivoPage');
+  });
+});
+
+describe('Scenario 1b: plan_next_lot with OperationalOnboardingCard capability', () => {
+  test('normalizeOperationalOnboarding returns continuity fallback when Gemini returns null', () => {
+    const result = normalizeOperationalOnboarding(null, continuitySignals(), capabilities());
+
+    expect(result).toEqual({
+      title: 'Planejar próximo lote',
+      message: 'Seu lote ativo está em acompanhamento. Planeje o próximo lote para manter a produção organizada.',
+      steps: [
+        'Revise a capacidade disponível',
+        'Crie o próximo lote',
+        'Vincule um protocolo antes de iniciar',
+      ],
+      ctaLabel: 'Planejar próximo lote',
+      priority: 20,
+      targetRoute: '/lotePage',
+      reason: 'Há lote ativo com protocolo e nenhuma urgência operacional no momento.',
+    });
+  });
+
+  test('normalizeOperationalOnboarding preserves valid Gemini copy with continuity route', () => {
+    const result = normalizeOperationalOnboarding(
+      validGeminiInput({ title: '  Planejar  ', targetRoute: '/protocoloPage' }),
+      continuitySignals(),
+      capabilities(),
+    );
+
+    expect(result.title).toBe('Planejar');
+    expect(result.targetRoute).toBe('/lotePage');
+  });
+
+  test('fallbacks use semantic reason from real derived signals instead of RULE-010', () => {
+    const context = continuityContext();
+    const signals = deriveInstantSignals(context);
+
+    expect(signals.stepId).toBe('plan_next_lot');
+    expect(signals.rulesApplied).toEqual(['RULE-010', 'RULE-016']);
+
+    const onboardingFallback = buildOperationalOnboardingFallback({ signals });
+    const enhancedFallback = buildEnhancedInstantFallback({
+      operationalContext: context,
+      clientCapabilities: capabilities(),
+      reason: 'test',
+    });
+
+    expect(onboardingFallback.reason).toBe('Há lote ativo com protocolo e nenhuma urgência operacional no momento.');
+    expect(enhancedFallback.operationalOnboarding.reason).toBe('Há lote ativo com protocolo e nenhuma urgência operacional no momento.');
+    expect(onboardingFallback.reason).not.toBe('Componente de progresso, stepper ou checklist é proibido.');
   });
 });
 
@@ -829,6 +905,16 @@ describe('buildEnhancedInstantFallback integration', () => {
     });
   }
 
+  function continuityContext() {
+    return normalizeOperationalContext({
+      dashboardState: { hasActiveLots: true, activeLotsCount: 1, hasProtocolLinkedToLatestLot: true },
+      agendaState: { hasGeneratedActivities: false, pendingActivitiesTodayCount: 0, overdueActivitiesCount: 0 },
+      fieldNotebookState: { hasRecentNotes: false, hasNutritionAdjustmentRecord: false },
+      alertState: { hasCriticalAlerts: false, criticalCount: 0 },
+      testSequenceSignals: {},
+    });
+  }
+
   function capabilities() {
     return normalizeClientCapabilities({
       supportedComponents: [
@@ -856,6 +942,24 @@ describe('buildEnhancedInstantFallback integration', () => {
     expect(result.infoRecommendation).toBeNull();
     expect(result.nextStepPrediction.targetRoute).toBe('/lotePage');
     expect(result.shortcuts.map((shortcut) => shortcut.route)).toEqual(['/protocoloPage', '/areaCultivoPage']);
+  });
+
+  it('populates continuity operationalOnboarding with plan_next_lot data', () => {
+    const result = buildEnhancedInstantFallback({
+      operationalContext: continuityContext(),
+      clientCapabilities: capabilities(),
+    });
+
+    expect(result.nextStepPrediction.stepId).toBe('plan_next_lot');
+    expect(result.nextStepPrediction.targetRoute).toBe('/lotePage');
+    expect(result.operationalOnboarding).toMatchObject({
+      title: 'Planejar próximo lote',
+      targetRoute: '/lotePage',
+      ctaLabel: 'Planejar próximo lote',
+      priority: 20,
+    });
+    expect(result.infoRecommendation).toBeNull();
+    expect(result.shortcuts[0].route).toBe('/lotePage');
   });
 
   it('sets operationalOnboarding to null when clientCapabilities lacks the component', () => {
