@@ -291,9 +291,7 @@ describe('Instant mode recommendation fixes', () => {
 
     test.each([
       ['active lot protocol flag', { dashboardState: { hasActiveLots: true, activeLotsCount: 1, hasProtocolLinkedToLatestLot: false, hasProtocolLinkedToActiveLot: true } }],
-      ['latest lot protocol id', { dashboardState: { hasActiveLots: true, activeLotsCount: 1, hasProtocolLinkedToLatestLot: false, latestLotProtocolId: 'protocol-1' } }],
       ['active lot protocol id', { dashboardState: { hasActiveLots: true, activeLotsCount: 1, hasProtocolLinkedToLatestLot: false, activeLotProtocolIds: ['protocol-1'] } }],
-      ['selected lot protocol id', { dashboardState: { hasActiveLots: true, activeLotsCount: 1, hasProtocolLinkedToLatestLot: false, selectedLotProtocolId: 'protocol-1' } }],
       ['protocol tasks', { agendaState: { hasGeneratedActivities: false, hasProtocolTasks: true, pendingActivitiesTodayCount: 0, overdueActivitiesCount: 0 } }],
       ['next protocol activity', { agendaState: { hasGeneratedActivities: false, nextActivityType: 'protocol_activity', pendingActivitiesTodayCount: 0, overdueActivitiesCount: 0 } }],
       ['test sequence lot with protocol', { testSequenceSignals: { lotWithProtocolCreated: true } }],
@@ -307,6 +305,20 @@ describe('Instant mode recommendation fixes', () => {
 
     test('keeps first lot onboarding for active lot without protocol evidence', () => {
       const result = deriveInstantSignals(firstHomeContext());
+
+      expect(result.stepId).toBe('create_lot_with_protocol');
+      expect(result.rulesApplied).toContain('RULE-001');
+    });
+
+    test('keeps first lot onboarding when only selected protocol id is stale', () => {
+      const result = deriveInstantSignals(firstHomeContext({
+        dashboardState: {
+          hasActiveLots: true,
+          activeLotsCount: 1,
+          hasProtocolLinkedToLatestLot: false,
+          selectedLotProtocolId: 'stale-protocol',
+        },
+      }));
 
       expect(result.stepId).toBe('create_lot_with_protocol');
       expect(result.rulesApplied).toContain('RULE-001');

@@ -154,12 +154,6 @@ function hasSafeProtocolId(value) {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-function hasProtocolIdEvidence(dashboard) {
-  return hasSafeProtocolId(dashboard.latestLotProtocolId)
-    || hasSafeProtocolId(dashboard.selectedLotProtocolId)
-    || (Array.isArray(dashboard.activeLotProtocolIds) && dashboard.activeLotProtocolIds.some(hasSafeProtocolId));
-}
-
 function deriveInstantSignals(context, options = {}) {
   const dashboard = context.dashboardState;
   const agenda = context.agendaState;
@@ -173,17 +167,18 @@ function deriveInstantSignals(context, options = {}) {
   const recentUserActions = context.recentUserActions || [];
   const rulesApplied = [RULE_IDS.NO_PROGRESS_BAR];
   const hasActiveLot = dashboard.hasActiveLots || dashboard.activeLotsCount > 0;
-  const positiveProtocolEvidence = dashboard.hasProtocolLinkedToLatestLot
-    || dashboard.hasProtocolLinkedToActiveLot
-    || hasProtocolIdEvidence(dashboard)
+  const hasActiveLotProtocolEvidence = dashboard.hasProtocolLinkedToActiveLot
+    || (Array.isArray(dashboard.activeLotProtocolIds) && dashboard.activeLotProtocolIds.some(hasSafeProtocolId));
+  const positiveProtocolEvidence = hasActiveLotProtocolEvidence
+    || dashboard.hasProtocolLinkedToLatestLot
     || agenda.hasProtocolTasks
     || agenda.nextActivityType === 'protocol_activity'
     || (agenda.latestTasks || []).some((task) => task.type === 'protocol_activity')
-    || testSequence.lotWithProtocolCreated === true;
+    || testSequence.lotWithProtocolCreated === true
+    || (hasActiveLot && agenda.hasGeneratedActivities);
 
   const effective = {
-    lotWithProtocolCreated: positiveProtocolEvidence
-      || (hasActiveLot && agenda.hasGeneratedActivities),
+    lotWithProtocolCreated: positiveProtocolEvidence,
     generatedActivitiesSeen: agenda.hasGeneratedActivities && (positiveProtocolEvidence || hasActiveLot),
     adjustmentRecorded: notebook.hasNutritionAdjustmentRecord,
     agendaActivitiesCompleted: agenda.lastAgendaInteraction === 'completed' && agenda.pendingToday === 0,
@@ -263,7 +258,7 @@ function deriveInstantSignals(context, options = {}) {
     return { stepId: 'review_final_home', targetRoute: '/lotePage', dashboardId: 'TAREFAS_PENDENTES', focusMessage: 'Revisar Agenda - lote segue em acompanhamento', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.review_final_home, 0.75) };
   }
 
-  if (!dashboard.hasProtocolLinkedToLatestLot && !effective.lotWithProtocolCreated) {
+  if (!hasActiveLotProtocolEvidence && !effective.lotWithProtocolCreated) {
     rulesApplied.push(RULE_IDS.NO_PROTOCOL_LOT);
     return { stepId: 'create_lot_with_protocol', targetRoute: '/lotePage', dashboardId: 'LOTE_PRODUCAO', focusMessage: 'Comece criando seu primeiro lote', rulesApplied, shortcuts: applyShortcutConfidence(STEP_SHORTCUTS.create_lot_with_protocol, 0.85) };
   }
