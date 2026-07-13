@@ -150,6 +150,16 @@ function hasRecentUserAction(actions, entityTypes, actionTypes) {
   return actions.some((item) => entityTypes.includes(item.entityType) && actionTypes.includes(item.action));
 }
 
+function hasSafeProtocolId(value) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function hasProtocolIdEvidence(dashboard) {
+  return hasSafeProtocolId(dashboard.latestLotProtocolId)
+    || hasSafeProtocolId(dashboard.selectedLotProtocolId)
+    || (Array.isArray(dashboard.activeLotProtocolIds) && dashboard.activeLotProtocolIds.some(hasSafeProtocolId));
+}
+
 function deriveInstantSignals(context, options = {}) {
   const dashboard = context.dashboardState;
   const agenda = context.agendaState;
@@ -159,13 +169,22 @@ function deriveInstantSignals(context, options = {}) {
   const cultivation = context.cultivationState || {};
   const team = context.teamState || {};
   const alerts = context.alertState;
+  const testSequence = context.testSequenceSignals || {};
   const recentUserActions = context.recentUserActions || [];
   const rulesApplied = [RULE_IDS.NO_PROGRESS_BAR];
+  const hasActiveLot = dashboard.hasActiveLots || dashboard.activeLotsCount > 0;
+  const positiveProtocolEvidence = dashboard.hasProtocolLinkedToLatestLot
+    || dashboard.hasProtocolLinkedToActiveLot
+    || hasProtocolIdEvidence(dashboard)
+    || agenda.hasProtocolTasks
+    || agenda.nextActivityType === 'protocol_activity'
+    || (agenda.latestTasks || []).some((task) => task.type === 'protocol_activity')
+    || testSequence.lotWithProtocolCreated === true;
 
   const effective = {
-    lotWithProtocolCreated: dashboard.hasProtocolLinkedToLatestLot
-      || (dashboard.hasActiveLots && agenda.hasGeneratedActivities),
-    generatedActivitiesSeen: agenda.hasGeneratedActivities && (dashboard.hasProtocolLinkedToLatestLot || dashboard.hasActiveLots),
+    lotWithProtocolCreated: positiveProtocolEvidence
+      || (hasActiveLot && agenda.hasGeneratedActivities),
+    generatedActivitiesSeen: agenda.hasGeneratedActivities && (positiveProtocolEvidence || hasActiveLot),
     adjustmentRecorded: notebook.hasNutritionAdjustmentRecord,
     agendaActivitiesCompleted: agenda.lastAgendaInteraction === 'completed' && agenda.pendingToday === 0,
     finalHomeChecked: false,
@@ -195,9 +214,8 @@ function deriveInstantSignals(context, options = {}) {
     || cultivation.speciesInProgressCount > 0
     || dashboard.hasUpcomingHarvests;
   const hasTeamSignal = team.activeMembers > 0 || team.overdueActivities > 0 || team.onTimeActivities > 0;
-  const hasActiveLot = dashboard.hasActiveLots || dashboard.activeLotsCount > 0;
   const hasContinuityContext = hasActiveLot
-    && dashboard.hasProtocolLinkedToLatestLot
+    && effective.lotWithProtocolCreated
     && !hasTodayTasks
     && !hasProtocolTask;
   const hasRecentLotCreated = hasRecentUserAction(recentUserActions, ['lot'], ['created']);

@@ -253,4 +253,63 @@ describe('Instant mode recommendation fixes', () => {
       expect(result.rulesApplied).toContain('RULE-016');
     });
   });
+
+  describe('active lot protocol evidence', () => {
+    function firstHomeContext(overrides = {}) {
+      return normalizeOperationalContext({
+        dashboardState: {
+          hasActiveLots: true,
+          activeLotsCount: 1,
+          hasProtocolLinkedToLatestLot: false,
+        },
+        agendaState: { hasGeneratedActivities: false, pendingActivitiesTodayCount: 0, overdueActivitiesCount: 0 },
+        alertState: { hasCriticalAlerts: false, criticalCount: 0 },
+        fieldNotebookState: { hasRecentNotes: false, hasNutritionAdjustmentRecord: false },
+        productionState: { hasProductionData: false },
+        cultivationState: { culturesCount: 0, speciesInProgressCount: 0 },
+        reservoirState: { hasReservoirs: false },
+        teamState: { activeMembers: 0, onTimeActivities: 0, overdueActivities: 0 },
+        ...overrides,
+      });
+    }
+
+    test('normalizes optional protocol evidence fields defensively', () => {
+      const context = normalizeOperationalContext({
+        dashboardState: {
+          hasProtocolLinkedToActiveLot: true,
+          latestLotProtocolId: ' latest-protocol ',
+          selectedLotProtocolId: ' selected-protocol ',
+          activeLotProtocolIds: [' one ', '', 'two', 'x'.repeat(100)],
+        },
+      });
+
+      expect(context.dashboardState.hasProtocolLinkedToActiveLot).toBe(true);
+      expect(context.dashboardState.latestLotProtocolId).toBe('latest-protocol');
+      expect(context.dashboardState.selectedLotProtocolId).toBe('selected-protocol');
+      expect(context.dashboardState.activeLotProtocolIds).toEqual(['one', 'two', 'x'.repeat(80)]);
+    });
+
+    test.each([
+      ['active lot protocol flag', { dashboardState: { hasActiveLots: true, activeLotsCount: 1, hasProtocolLinkedToLatestLot: false, hasProtocolLinkedToActiveLot: true } }],
+      ['latest lot protocol id', { dashboardState: { hasActiveLots: true, activeLotsCount: 1, hasProtocolLinkedToLatestLot: false, latestLotProtocolId: 'protocol-1' } }],
+      ['active lot protocol id', { dashboardState: { hasActiveLots: true, activeLotsCount: 1, hasProtocolLinkedToLatestLot: false, activeLotProtocolIds: ['protocol-1'] } }],
+      ['selected lot protocol id', { dashboardState: { hasActiveLots: true, activeLotsCount: 1, hasProtocolLinkedToLatestLot: false, selectedLotProtocolId: 'protocol-1' } }],
+      ['protocol tasks', { agendaState: { hasGeneratedActivities: false, hasProtocolTasks: true, pendingActivitiesTodayCount: 0, overdueActivitiesCount: 0 } }],
+      ['next protocol activity', { agendaState: { hasGeneratedActivities: false, nextActivityType: 'protocol_activity', pendingActivitiesTodayCount: 0, overdueActivitiesCount: 0 } }],
+      ['test sequence lot with protocol', { testSequenceSignals: { lotWithProtocolCreated: true } }],
+      ['generated activities with active lot', { agendaState: { hasGeneratedActivities: true, pendingActivitiesTodayCount: 0, overdueActivitiesCount: 0 } }],
+    ])('does not recommend first lot onboarding when evidence is %s', (_, overrides) => {
+      const result = deriveInstantSignals(firstHomeContext(overrides));
+
+      expect(result.stepId).not.toBe('create_lot_with_protocol');
+      expect(result.rulesApplied).not.toContain('RULE-001');
+    });
+
+    test('keeps first lot onboarding for active lot without protocol evidence', () => {
+      const result = deriveInstantSignals(firstHomeContext());
+
+      expect(result.stepId).toBe('create_lot_with_protocol');
+      expect(result.rulesApplied).toContain('RULE-001');
+    });
+  });
 });

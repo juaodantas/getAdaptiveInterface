@@ -53,6 +53,10 @@ function normalizeStringArray(values, maxItems = 8, maxLength = 80) {
     : [];
 }
 
+function normalizeProtocolIdArray(values) {
+  return normalizeStringArray(values, 8, 80);
+}
+
 function normalizeTextOrObjectArray(values, maxItems = 8) {
   if (!Array.isArray(values)) return [];
 
@@ -234,6 +238,10 @@ function normalizeOperationalContext(raw) {
       })),
       speciesInProgress: normalizeTextOrObjectArray(dashboardState.speciesInProgress),
       hasProtocolLinkedToLatestLot: toBoolean(dashboardState.hasProtocolLinkedToLatestLot),
+      hasProtocolLinkedToActiveLot: toBoolean(dashboardState.hasProtocolLinkedToActiveLot),
+      latestLotProtocolId: toSafeText(dashboardState.latestLotProtocolId, 80),
+      selectedLotProtocolId: toSafeText(dashboardState.selectedLotProtocolId, 80),
+      activeLotProtocolIds: normalizeProtocolIdArray(dashboardState.activeLotProtocolIds),
       hasUpcomingHarvests: toBoolean(dashboardState.hasUpcomingHarvests),
     },
     agendaState: {
